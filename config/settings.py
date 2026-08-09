@@ -135,9 +135,14 @@ SQUARE_OFF_SCHEDULE_TIME = "15:15"
 EOD_REPORT_SCHEDULE_TIME = "15:30"
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Detect Railway Persistent Storage Volume Mount (/data)
+RAILWAY_DATA_DIR = "/data" if os.path.exists("/data") else os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "")
+PERSISTENT_BASE_DIR = RAILWAY_DATA_DIR if RAILWAY_DATA_DIR and os.path.exists(RAILWAY_DATA_DIR) else BASE_DIR
+
 DATA_DIR = os.path.join(BASE_DIR, "data_cache")
-LOGS_DIR = os.path.join(BASE_DIR, "logs")
-REPORTS_DIR = os.path.join(BASE_DIR, "reports")
-TOKEN_FILE_PATH = os.path.join(BASE_DIR, "access_token.json")
-STATE_FILE_PATH = os.path.join(BASE_DIR, "state.json")
+LOGS_DIR = os.path.join(PERSISTENT_BASE_DIR, "logs")
+REPORTS_DIR = os.path.join(PERSISTENT_BASE_DIR, "reports")
+TOKEN_FILE_PATH = os.path.join(PERSISTENT_BASE_DIR, "access_token.json")
+STATE_FILE_PATH = os.path.join(PERSISTENT_BASE_DIR, "state.json")
 DB_FILE_PATH = os.path.join(LOGS_DIR, "trades.db")

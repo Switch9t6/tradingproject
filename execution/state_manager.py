@@ -113,8 +113,26 @@ class StateManager:
         except Exception as e:
             print(f"[State Manager] Error saving state: {e}")
 
+    def is_drawdown_limit_exceeded(self, max_drawdown_pct: float = 5.0) -> bool:
+        """
+        Calculates today's realized PnL against portfolio capital.
+        Returns True if total loss exceeds max_drawdown_pct (e.g. -5.0%), halting further trade execution.
+        """
+        today_str = datetime.date.today().isoformat()
+        trades = self.get_todays_trades()
+        net_daily_pnl = sum((t.get("net_pnl") or 0.0) for t in trades)
+        wallet = self.get_current_wallet_balance()
+        max_allowed_loss = -1.0 * (wallet * (max_drawdown_pct / 100.0))
+        
+        if net_daily_pnl < max_allowed_loss:
+            print(f"🛑 [CIRCUIT BREAKER ACTIVATED] Daily Net PnL (Rs {net_daily_pnl:,.2f}) breached -{max_drawdown_pct}% max drawdown limit. All trading halted for today.")
+            return True
+        return False
+
     def is_trade_allowed_today(self, override_daily_limit: bool = False) -> bool:
         self._check_date_reset()
+        if self.is_drawdown_limit_exceeded():
+            return False
         if override_daily_limit:
             print(f"[MANUAL OVERRIDE ACTIVE] Daily {MAX_DAILY_TRADES}-trade cap lockout manually bypassed for today ({self.state['date']}).")
             return True

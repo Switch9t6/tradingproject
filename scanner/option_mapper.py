@@ -68,17 +68,27 @@ def resolve_atm_option_contract(
         "budget_approved": budget_approved and spread_approved and delta_approved
     }
     
+    # Open Interest (OI) & Liquidity Depth Check (>= 100,000)
+    open_interest = candidate.get("open_interest", 150000)
+    oi_approved = open_interest >= 100000
+
     print("\n[Option Contract Mapper]")
     print(f"  Mapped Contract     : {option_symbol}")
     print(f"  ATM Strike Price    : Rs {atm_strike} ({option_type}) | Delta: {estimated_delta:.2f}")
     print(f"  Bid / Ask Quote     : Rs {bid_price:.2f} / Rs {ask_price:.2f} (Spread: {bid_ask_spread_pct*100:.2f}%)")
+    print(f"  Open Interest (OI)  : {open_interest:,} contracts")
     print(f"  Lot Size            : {lot_size} shares")
     print(f"  Total Lot Cost      : Rs {total_lot_cost:,.2f} INR (Budget Cap: Rs {max_budget:,.2f} INR)")
     print(f"  Spread Check        : {'APPROVED (<= 1.5%)' if spread_approved else 'REJECTED (Wide Spread)'}")
+    print(f"  Liquidity OI Check  : {'APPROVED (>= 100k)' if oi_approved else 'REJECTED (Low OI)'}")
     print(f"  Budget Status       : {'APPROVED' if budget_approved else 'REJECTED (Exceeds Budget)'}")
     
     if not spread_approved:
         print(f"WARNING: Contract {option_symbol} Bid-Ask Spread ({bid_ask_spread_pct*100:.2f}%) exceeds 1.5% limit. Rejecting.")
+        return None
+
+    if not oi_approved:
+        print(f"WARNING: Contract {option_symbol} Open Interest ({open_interest:,}) is below 100,000 contracts limit. Rejecting.")
         return None
         
     if not budget_approved:

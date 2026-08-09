@@ -3,7 +3,8 @@ Telegram Command Control Module (Non-Blocking Background Listener)
 ==================================================================
 Runs a Telegram Bot polling loop continuously so that incoming
 Telegram commands (/start, /status, /report, /reports, /trades, /stop, /resume)
-are handled instantly while the main trading pipeline executes in parallel.
+and interactive inline keyboard buttons are handled instantly while the main
+trading pipeline executes in parallel.
 
 Market Hours Enforcement (09:15 AM to 03:15 PM IST):
 - When market is CLOSED (outside Mon-Fri 09:15 AM - 03:15 PM IST):
@@ -50,6 +51,20 @@ def check_is_market_open() -> bool:
     return datetime.time(9, 15) <= current_time <= datetime.time(15, 15)
 
 
+def _build_action_keyboard(telebot_module):
+    """Generates an interactive inline button keyboard for Telegram messages."""
+    markup = telebot_module.types.InlineKeyboardMarkup(row_width=2)
+    btn_status = telebot_module.types.InlineKeyboardButton("📊 Status", callback_data="cb_status")
+    btn_report = telebot_module.types.InlineKeyboardButton("📄 EOD Report", callback_data="cb_report")
+    btn_trades = telebot_module.types.InlineKeyboardButton("📜 Trade Log", callback_data="cb_trades")
+    btn_stop = telebot_module.types.InlineKeyboardButton("🛑 Stop Engine", callback_data="cb_stop")
+    btn_resume = telebot_module.types.InlineKeyboardButton("✅ Resume Engine", callback_data="cb_resume")
+    markup.add(btn_status, btn_report)
+    markup.add(btn_trades)
+    markup.add(btn_stop, btn_resume)
+    return markup
+
+
 def _get_bot():
     """Lazily initialize the telebot instance."""
     global _bot
@@ -65,18 +80,20 @@ def _get_bot():
 
 
 def _register_handlers(bot):
-    """Register all Telegram command handlers on the bot instance."""
+    """Register all Telegram command handlers and inline button callbacks on the bot instance."""
+    import telebot
 
     @bot.message_handler(commands=["start"])
     def cmd_start(message):
         if not check_is_market_open():
-            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM")
+            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM", reply_markup=_build_action_keyboard(telebot))
             return
 
         bot.reply_to(
             message,
             "🚀 [EXECUTING ENGINE] Launching trading pipeline ('python main.py --live')...\n\n"
-            "System scanning top-ranked sectors & quantitative multi-factor matrix."
+            "System scanning top-ranked sectors & quantitative multi-factor matrix.",
+            reply_markup=_build_action_keyboard(telebot)
         )
 
         def _run_pipeline_job():
@@ -94,7 +111,7 @@ def _register_handlers(bot):
     @bot.message_handler(commands=["help"])
     def cmd_help(message):
         if not check_is_market_open():
-            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM")
+            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM", reply_markup=_build_action_keyboard(telebot))
             return
 
         help_text = (
@@ -111,12 +128,12 @@ def _register_handlers(bot):
             "-------------------------------------------\n"
             "Engine Version: v2.0 (100% Real Live Production)"
         )
-        bot.reply_to(message, help_text)
+        bot.reply_to(message, help_text, reply_markup=_build_action_keyboard(telebot))
 
     @bot.message_handler(commands=["stop"])
     def cmd_stop(message):
         if not check_is_market_open():
-            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM")
+            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM", reply_markup=_build_action_keyboard(telebot))
             return
 
         try:
@@ -126,7 +143,8 @@ def _register_handlers(bot):
                 message,
                 "[EMERGENCY STOP ACTIVATED]\n"
                 "Trading engine PAUSED. No new trades will be placed.\n"
-                "Send /resume to re-enable."
+                "Send /resume to re-enable.",
+                reply_markup=_build_action_keyboard(telebot)
             )
             _safe_print("[Telegram Control] EMERGENCY STOP activated via Telegram /stop command.")
         except Exception as e:
@@ -135,7 +153,7 @@ def _register_handlers(bot):
     @bot.message_handler(commands=["resume"])
     def cmd_resume(message):
         if not check_is_market_open():
-            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM")
+            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM", reply_markup=_build_action_keyboard(telebot))
             return
 
         try:
@@ -144,7 +162,8 @@ def _register_handlers(bot):
             bot.reply_to(
                 message,
                 "[TRADING ENGINE RESUMED]\n"
-                "Dynamic scanning re-enabled. New trades will execute normally."
+                "Dynamic scanning re-enabled. New trades will execute normally.",
+                reply_markup=_build_action_keyboard(telebot)
             )
             _safe_print("[Telegram Control] Trading engine RESUMED via Telegram /resume command.")
         except Exception as e:
@@ -189,7 +208,7 @@ def _register_handlers(bot):
             f"Timestamp           : {now.strftime('%Y-%m-%d %H:%M:%S')} IST\n"
             "========================================"
         )
-        bot.reply_to(message, status_msg)
+        bot.reply_to(message, status_msg, reply_markup=_build_action_keyboard(telebot))
 
     @bot.message_handler(commands=["report", "reports"])
     def cmd_report(message):
@@ -213,7 +232,7 @@ def _register_handlers(bot):
             if os.path.exists(report_path):
                 try:
                     with open(report_path, "rb") as doc:
-                        bot.send_document(message.chat.id, doc, caption=f"[LIVE EOD REPORT] {os.path.basename(report_path)}")
+                        bot.send_document(message.chat.id, doc, caption=f"[LIVE EOD REPORT] {os.path.basename(report_path)}", reply_markup=_build_action_keyboard(telebot))
                     sent = True
                     _safe_print(f"[Telegram Control] Live report sent: {os.path.basename(report_path)}")
                     break
@@ -222,7 +241,7 @@ def _register_handlers(bot):
                     return
 
         if not sent:
-            bot.reply_to(message, "[NO REPORTS] No live market EOD report files found yet for today.")
+            bot.reply_to(message, "[NO REPORTS] No live market EOD report files found yet for today.", reply_markup=_build_action_keyboard(telebot))
 
     @bot.message_handler(commands=["trades"])
     def cmd_trades(message):
@@ -233,7 +252,7 @@ def _register_handlers(bot):
             trades = sm.get_todays_trades()
 
             if not trades:
-                bot.reply_to(message, "[TRADES] No live trades executed today.")
+                bot.reply_to(message, "[TRADES] No live trades executed today.", reply_markup=_build_action_keyboard(telebot))
                 return
 
             lines = [f"[TODAY'S LIVE TRADE LOG] ({len(trades)} trades)\n========================================"]
@@ -254,9 +273,28 @@ def _register_handlers(bot):
             lines.append(f"\n========================================")
             lines.append(f"NET DAILY PnL: {'+' if total_pnl>=0 else ''}Rs {total_pnl:,.2f} INR")
 
-            bot.reply_to(message, "\n".join(lines))
+            bot.reply_to(message, "\n".join(lines), reply_markup=_build_action_keyboard(telebot))
         except Exception as e:
             bot.reply_to(message, f"[ERROR] Could not fetch trades: {e}")
+
+    # Callback Query Handler for Interactive Inline Buttons
+    @bot.callback_query_handler(func=lambda call: True)
+    def handle_callback_query(call):
+        if call.data == "cb_status":
+            cmd_status(call.message)
+        elif call.data == "cb_report":
+            cmd_report(call.message)
+        elif call.data == "cb_trades":
+            cmd_trades(call.message)
+        elif call.data == "cb_stop":
+            cmd_stop(call.message)
+        elif call.data == "cb_resume":
+            cmd_resume(call.message)
+            
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
 
 
 def is_bot_disabled() -> bool:
