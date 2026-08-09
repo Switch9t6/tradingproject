@@ -9,11 +9,8 @@ from config.settings import DB_FILE_PATH, REPORTS_DIR, INITIAL_WALLET_CAPITAL
 from execution.state_manager import StateManager
 
 HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EOD {{ mode_label }} Dashboard | {{ date }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>EOD LIVE Dashboard | {{ date }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -34,35 +31,38 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background-color: var(--bg-dark);
             color: var(--text-main);
-            padding: 40px 20px;
+            padding: 24px 16px;
             min-height: 100vh;
             line-height: 1.5;
+            -webkit-text-size-adjust: 100%;
         }
 
         .container {
             max-width: 1100px;
             margin: 0 auto;
+            width: 100%;
         }
 
         .header {
             background: linear-gradient(135deg, rgba(17, 24, 39, 0.9), rgba(31, 41, 55, 0.9));
             backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
             border: 1px solid var(--border-color);
             border-radius: 16px;
-            padding: 28px 36px;
-            margin-bottom: 24px;
+            padding: 24px 28px;
+            margin-bottom: 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
         }
 
         .header-title h1 {
             font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 26px;
+            font-size: 24px;
             font-weight: 800;
             background: linear-gradient(135deg, #38bdf8, #818cf8);
             -webkit-background-clip: text;
@@ -72,34 +72,30 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         .header-subtitle {
             color: var(--text-muted);
-            font-size: 14px;
+            font-size: 13px;
         }
 
         .badges {
             display: flex;
-            gap: 10px;
+            gap: 8px;
             align-items: center;
+            flex-wrap: wrap;
         }
 
         .badge {
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 700;
-            padding: 6px 14px;
+            padding: 5px 12px;
             border-radius: 30px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            white-space: nowrap;
         }
 
         .badge-security {
             background: rgba(16, 185, 129, 0.15);
             color: var(--accent-green);
             border: 1px solid rgba(16, 185, 129, 0.3);
-        }
-
-        .badge-mode-dryrun {
-            background: rgba(139, 92, 246, 0.2);
-            color: #c084fc;
-            border: 1px solid rgba(139, 92, 246, 0.4);
         }
 
         .badge-mode-live {
@@ -116,16 +112,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         .metrics-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 24px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 14px;
+            margin-bottom: 20px;
         }
 
         .metric-card {
             background: var(--card-bg);
             border: 1px solid var(--border-color);
             border-radius: 14px;
-            padding: 20px;
+            padding: 18px;
             transition: transform 0.2s ease, border-color 0.2s ease;
         }
 
@@ -135,22 +131,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         .metric-label {
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 600;
             color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }
 
         .metric-value {
             font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 24px;
+            font-size: 22px;
             font-weight: 800;
+            word-break: break-word;
         }
 
         .metric-subtext {
-            font-size: 12px;
+            font-size: 11px;
             color: var(--text-muted);
             margin-top: 4px;
         }
@@ -162,35 +159,37 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             background: var(--card-bg);
             border: 1px solid var(--border-color);
             border-radius: 16px;
-            padding: 28px;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+            padding: 20px;
+            box-shadow: 0 15px 25px -5px rgba(0, 0, 0, 0.3);
         }
 
         .table-title {
             font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 18px;
+            font-size: 17px;
             font-weight: 700;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
             display: flex;
             align-items: center;
             justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
         }
 
         table {
             width: 100%;
             border-collapse: collapse;
             text-align: left;
-            font-size: 14px;
+            font-size: 13px;
         }
 
         th {
             background: var(--card-inner);
             color: var(--text-muted);
             font-weight: 600;
-            font-size: 12px;
+            font-size: 11px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            padding: 14px 16px;
+            padding: 12px 14px;
             border-bottom: 1px solid var(--border-color);
         }
 
@@ -198,7 +197,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         th:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
 
         td {
-            padding: 16px;
+            padding: 14px;
             border-bottom: 1px solid rgba(55, 65, 81, 0.5);
             font-weight: 500;
         }
@@ -210,20 +209,22 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .symbol-badge {
             background: rgba(255, 255, 255, 0.06);
             border: 1px solid var(--border-color);
-            padding: 4px 10px;
+            padding: 4px 8px;
             border-radius: 6px;
             font-family: monospace;
             font-weight: 700;
             color: var(--accent-blue);
+            white-space: nowrap;
         }
 
         .reason-tag {
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 700;
-            padding: 4px 10px;
+            padding: 4px 8px;
             border-radius: 20px;
             display: inline-block;
             text-transform: uppercase;
+            white-space: nowrap;
         }
 
         .tag-target { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
@@ -233,14 +234,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         .footer {
             text-align: center;
-            margin-top: 32px;
-            font-size: 13px;
+            margin-top: 24px;
+            font-size: 12px;
             color: var(--text-muted);
         }
 
         .empty-state {
             text-align: center;
-            padding: 40px;
+            padding: 30px 16px;
             color: var(--text-muted);
         }
 
@@ -249,20 +250,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
             border-radius: 8px;
+            display: block;
         }
 
-        /* Mobile Responsiveness Rules */
+        /* Mobile First Responsive Styles */
         @media (max-width: 768px) {
-            body { padding: 12px 8px; }
-            .container { width: 100%; }
+            body { padding: 12px 10px; }
             .header {
                 flex-direction: column;
                 align-items: flex-start;
                 padding: 16px 14px;
                 gap: 12px;
             }
-            .header-title h1 { font-size: 20px; line-height: 1.3; }
-            .header-subtitle { font-size: 12px; }
+            .header-title h1 { font-size: 19px; line-height: 1.3; }
+            .header-subtitle { font-size: 11px; }
             .badges {
                 flex-wrap: wrap;
                 gap: 6px;
@@ -270,7 +271,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
             .badge {
                 font-size: 10px;
-                padding: 4px 10px;
+                padding: 4px 8px;
             }
             .metrics-grid {
                 grid-template-columns: repeat(2, 1fr);
@@ -278,30 +279,30 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 margin-bottom: 16px;
             }
             .metric-card {
-                padding: 14px 12px;
+                padding: 12px 10px;
             }
             .metric-label {
-                font-size: 10px;
+                font-size: 9px;
                 margin-bottom: 4px;
             }
             .metric-value {
-                font-size: 18px;
+                font-size: 17px;
             }
             .metric-subtext {
-                font-size: 10px;
+                font-size: 9.5px;
             }
             .card-table {
-                padding: 14px 10px;
+                padding: 12px 10px;
             }
             .table-title {
-                font-size: 15px;
+                font-size: 14px;
                 flex-direction: column;
                 align-items: flex-start;
                 gap: 4px;
             }
             table {
-                min-width: 650px;
-                font-size: 12px;
+                min-width: 600px;
+                font-size: 11.5px;
             }
             th, td {
                 padding: 10px 8px;
@@ -312,12 +313,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         @media (max-width: 480px) {
             .metrics-grid {
                 grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
             }
             .metric-card {
                 padding: 10px 8px;
             }
             .metric-value {
-                font-size: 16px;
+                font-size: 15px;
             }
         }
     </style>
