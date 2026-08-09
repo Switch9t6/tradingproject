@@ -11,7 +11,7 @@ from upstox_client.rest import ApiException
 from config.settings import (
     UPSTOX_API_BASE_URL,
     INITIAL_WALLET_CAPITAL,
-    MAX_SINGLE_LOT_PREMIUM_BUDGET,
+    MICRO_CAPITAL_BUDGET_CAP,
     TAKE_PROFIT_PCT,
     STOP_LOSS_PCT,
     LIMIT_ORDER_BUFFER_PCT,
@@ -113,8 +113,8 @@ class UpstoxOptionsTrader:
         # Fetch Real-Time Wallet Balance
         available_cash = self.get_read_only_wallet_balance()
         
-        # Dynamic Real-Time Trade Budget Sizing based on Live Wallet Balance
-        dynamic_budget = min(available_cash, MAX_SINGLE_LOT_PREMIUM_BUDGET)
+        # Dynamic Real-Time Trade Budget Sizing based 100% on Live Wallet Balance (or micro-capital cap)
+        dynamic_budget = MICRO_CAPITAL_BUDGET_CAP if (locals().get("micro_capital") or getattr(self, "micro_capital", False)) else available_cash
         
         # Check if consecutive loss scaling applies
         if self.state_mgr.get_last_trade_pnl() < 0 and available_cash == INITIAL_WALLET_CAPITAL:

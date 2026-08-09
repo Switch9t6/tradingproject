@@ -175,8 +175,8 @@ def run_dynamic_wallet_sized_6m_backtest():
         entry_premium = round(ask_premium * 1.005, 2)
         total_lot_cost = round(entry_premium * lot_size, 2)
 
-        # DYNAMIC REAL-TIME WALLET BALANCE SIZING
-        current_dynamic_budget = min(wallet, MAX_SINGLE_LOT_PREMIUM_BUDGET)
+        # DYNAMIC REAL-TIME WALLET BALANCE SIZING (100% Wallet Allocation)
+        current_dynamic_budget = wallet
         if total_lot_cost > current_dynamic_budget:
             continue
 

@@ -1,7 +1,6 @@
 import math
 from typing import Dict, Any, Optional
 from config.settings import (
-    MAX_SINGLE_LOT_PREMIUM_BUDGET,
     TARGET_DELTA_MIN,
     TARGET_DELTA_MAX,
     MAX_BID_ASK_SPREAD_PCT
@@ -9,14 +8,16 @@ from config.settings import (
 
 def resolve_atm_option_contract(
     candidate: Dict[str, Any],
-    max_budget: float = MAX_SINGLE_LOT_PREMIUM_BUDGET,
+    max_budget: Optional[float] = None,
     simulated_spread_pct: float = 0.008
 ) -> Optional[Dict[str, Any]]:
     """
     UPGRADE #3: Option Selection Guardrails.
     Map top breakout candidate to Delta 0.50–0.55 ATM Option contract (CE/PE),
-    enforce Bid-Ask Spread <= 1.5% check, and verify single-lot premium budget check <= INR 10,000.
+    enforce Bid-Ask Spread <= 1.5% check, and verify single-lot premium budget against available wallet balance.
     """
+    if max_budget is None:
+        max_budget = float("inf")
     symbol = candidate["symbol"]
     spot_price = candidate["spot_price"]
     direction = candidate["direction"]

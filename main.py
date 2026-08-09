@@ -12,7 +12,7 @@ from scanner.macro_sector_engine import MacroSectorNewsEngine
 from execution.upstox_trader import UpstoxOptionsTrader
 from execution.telegram_control import start_telegram_listener_background, is_bot_disabled
 from reporting.eod_reporter import generate_eod_report
-from config.settings import INITIAL_WALLET_CAPITAL, MAX_SINGLE_LOT_PREMIUM_BUDGET, MICRO_CAPITAL_BUDGET_CAP, MAX_DAILY_TRADES
+from config.settings import INITIAL_WALLET_CAPITAL, MICRO_CAPITAL_BUDGET_CAP, MAX_DAILY_TRADES
 
 def security_audit_check():
     """
@@ -31,7 +31,7 @@ def security_audit_check():
                     content = f.read()
                     for pattern in forbidden_patterns:
                         if pattern in content:
-                            print(f"[SECURITY AUDIT FAILED] Forbidden fund modification pattern '{pattern}' found in {filepath}")
+                            print(f"[SECURITY AUDIT FAILURE] Forbidden fund modification pattern '{pattern}' found in {filepath}")
                             audit_passed = False
                             
     if audit_passed:
@@ -69,12 +69,16 @@ def run_daily_pipeline(
     override_daily_limit: bool = False,
     auto_approve: bool = False
 ):
-    budget_cap = MICRO_CAPITAL_BUDGET_CAP if micro_capital else MAX_SINGLE_LOT_PREMIUM_BUDGET
+    from execution.state_manager import StateManager
+    state_mgr = StateManager()
+    live_wallet = state_mgr.get_current_wallet_balance()
+
+    budget_cap = MICRO_CAPITAL_BUDGET_CAP if micro_capital else live_wallet
     
     print("=" * 80)
     print("                      QUANTITATIVE MULTI-FACTOR TRADING ENGINE                 ")
     print(f"      Mode: 100% REAL LIVE PRODUCTION")
-    print(f"      Wallet Base: Rs {INITIAL_WALLET_CAPITAL:,.2f} INR | Single Lot Budget Cap: Rs {budget_cap:,.2f} INR {'(MICRO-CAPITAL MODE)' if micro_capital else ''}")
+    print(f"      Wallet Base: Rs {live_wallet:,.2f} INR | Single Lot Budget Cap: Rs {budget_cap:,.2f} INR {'(MICRO-CAPITAL MODE)' if micro_capital else '(DYNAMIC 100% WALLET CAP)'}")
     print(f"      Daily Cap: {'MANUAL OVERRIDE ACTIVE (UNLIMITED TRADES)' if override_daily_limit else f'MAX {MAX_DAILY_TRADES} TRADE/DAY'}")
     print(f"      Approval Guardrail: {'INTERACTIVE USER CONFIRMATION REQUIRED' if not auto_approve else 'AUTO-APPROVED'}")
     print("=" * 80)

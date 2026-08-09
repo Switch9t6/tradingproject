@@ -15,9 +15,9 @@ UPSTOX_TOKEN_URL = "https://api.upstox.com/v2/login/authorization/token"
 UPSTOX_API_BASE_URL = "https://api.upstox.com/v2"
 
 # Security & Read-Only Capital Constraints
-INITIAL_WALLET_CAPITAL = 10000.0          # INR 10,000 Read-Only Capital
-MAX_SINGLE_LOT_PREMIUM_BUDGET = 10000.0  # Max single lot premium limit <= INR 10,000
-MICRO_CAPITAL_BUDGET_CAP = 250.0          # Micro-Capital Live Test Budget Cap <= INR 250.00
+INITIAL_WALLET_CAPITAL = 10000.0          # INR 10,000 Initial Reference Capital
+MICRO_CAPITAL_BUDGET_CAP = 250.0          # Micro-Capital Live Test Budget Cap <= INR 250.00 (UNTOUCHED)
+# Note: Standard single-lot premium budget is 100% dynamically sized based on actual available wallet balance.
 
 # Strict Daily Guardrails
 MAX_DAILY_TRADES = 1                      # HARD CAP: MAX 1 TRADE PER DAY
