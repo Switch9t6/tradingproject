@@ -1,15 +1,14 @@
 """
 Telegram Command Control Module (Non-Blocking Background Listener)
 ==================================================================
-Runs a Telegram Bot polling loop in a daemon background thread so that
-incoming /start, /status, /stop, /resume commands are handled instantly
-while the main trading pipeline executes in the foreground.
+Runs a Telegram Bot polling loop continuously so that incoming
+Telegram commands (/start, /status, /report, /reports, /trades, /stop, /resume)
+are handled instantly while the main trading pipeline executes in parallel.
 
-Commands:
-  /start, /help  - Show available commands
-  /status        - Live wallet balance, engine state, active positions
-  /stop          - Emergency kill switch (creates BOT_DISABLED.flag)
-  /resume        - Re-enable trading (removes BOT_DISABLED.flag)
+Market Hours Enforcement:
+- When market is CLOSED (outside Mon-Fri 09:15 - 15:30 IST):
+  - /start, /resume, /stop return "Market is closed."
+  - /status, /report, /reports, /trades remain ACTIVE to view live stats and reports.
 """
 
 import os
@@ -26,7 +25,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 BOT_DISABLED_FLAG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "BOT_DISABLED.flag")
 
-# Module-level bot instance (initialized only if token is present)
+# Module-level bot instance
 _bot = None
 _listener_started = False
 
@@ -37,6 +36,15 @@ def _safe_print(text: str):
         print(text)
     except UnicodeEncodeError:
         print(text.encode(sys.stdout.encoding or "utf-8", errors="replace").decode(sys.stdout.encoding or "utf-8", errors="replace"))
+
+
+def check_is_market_open() -> bool:
+    """Validates whether current time is within official NSE trading window (Mon-Fri 09:15 - 15:30 IST)."""
+    now = datetime.datetime.now()
+    if now.weekday() >= 5: # 5 = Saturday, 6 = Sunday
+        return False
+    current_time = now.time()
+    return datetime.time(9, 15) <= current_time <= datetime.time(15, 30)
 
 
 def _get_bot():
@@ -58,60 +66,38 @@ def _register_handlers(bot):
 
     @bot.message_handler(commands=["start", "help"])
     def cmd_start(message):
+        if not check_is_market_open():
+            bot.reply_to(
+                message,
+                "Market is closed (NSE Operating Window: Mon-Fri 09:15 - 15:30 IST).\n\n"
+                "Off-market available commands:\n"
+                "/status - View Live Wallet & Engine Health\n"
+                "/report - Download Live EOD Report\n"
+                "/trades - View Today's Executed Trade Log"
+            )
+            return
+            
         help_text = (
-            "[UPSTOX ALGORITHMIC ENGINE]\n"
+            "[UPSTOX LIVE ALGORITHMIC ENGINE]\n"
             "-------------------------------------------\n"
             "Available Commands:\n"
             "/status  - Live Wallet Balance & Bot Health\n"
-            "/report  - Download today's EOD HTML report\n"
+            "/report  - Download today's Live EOD HTML report\n"
             "/trades  - View today's executed trade log\n"
             "/stop    - Emergency Pause (Kill Switch)\n"
             "/resume  - Re-enable Trading Engine\n"
             "/help    - Show this help message\n"
             "-------------------------------------------\n"
-            "Engine Version: v2.0 (Production)"
+            "Engine Version: v2.0 (100% Real Live Production)"
         )
         bot.reply_to(message, help_text)
 
-    @bot.message_handler(commands=["status"])
-    def cmd_status(message):
-        now = datetime.datetime.now()
-        is_paused = os.path.exists(BOT_DISABLED_FLAG)
-        engine_state = "PAUSED (Kill Switch Active)" if is_paused else "ONLINE & SCANNING"
-
-        # Attempt to fetch live wallet balance
-        wallet_str = "N/A (Token Refresh Required)"
-        try:
-            from execution.state_manager import StateManager
-            sm = StateManager()
-            wallet_val = sm.get_current_wallet_balance()
-            wallet_str = f"Rs {wallet_val:,.2f} INR"
-        except Exception:
-            pass
-
-        # Fetch today's trade count
-        trade_count = "N/A"
-        try:
-            from execution.state_manager import StateManager
-            sm = StateManager()
-            trades = sm.get_todays_trades()
-            trade_count = str(len(trades))
-        except Exception:
-            pass
-
-        status_msg = (
-            "[SYSTEM STATUS REPORT]\n"
-            "========================================\n"
-            f"Live Wallet Balance : {wallet_str}\n"
-            f"Engine State        : {engine_state}\n"
-            f"Trades Today        : {trade_count}\n"
-            f"Timestamp           : {now.strftime('%Y-%m-%d %H:%M:%S')} IST\n"
-            "========================================"
-        )
-        bot.reply_to(message, status_msg)
-
     @bot.message_handler(commands=["stop"])
     def cmd_stop(message):
+        if not check_is_market_open():
+            bot.reply_to(message, "Market is closed.")
+            return
+            
         try:
             with open(BOT_DISABLED_FLAG, "w") as f:
                 f.write("DISABLED_BY_TELEGRAM")
@@ -127,6 +113,10 @@ def _register_handlers(bot):
 
     @bot.message_handler(commands=["resume"])
     def cmd_resume(message):
+        if not check_is_market_open():
+            bot.reply_to(message, "Market is closed.")
+            return
+            
         try:
             if os.path.exists(BOT_DISABLED_FLAG):
                 os.remove(BOT_DISABLED_FLAG)
@@ -139,54 +129,93 @@ def _register_handlers(bot):
         except Exception as e:
             bot.reply_to(message, f"[ERROR] Failed to resume: {e}")
 
-    @bot.message_handler(commands=["report"])
+    @bot.message_handler(commands=["status"])
+    def cmd_status(message):
+        # /status works ANYTIME (both when market is open and closed)
+        now = datetime.datetime.now()
+        market_open = check_is_market_open()
+        market_state = "OPEN (Trading Window Active)" if market_open else "CLOSED (Mon-Fri 09:15 - 15:30 IST)"
+        is_paused = os.path.exists(BOT_DISABLED_FLAG)
+        engine_state = "PAUSED (Kill Switch Active)" if is_paused else ("ONLINE & SCANNING" if market_open else "STANDBY (Market Closed)")
+
+        # Attempt to fetch live wallet balance
+        wallet_str = "N/A (Upstox Token Sync Required)"
+        try:
+            from execution.state_manager import StateManager
+            sm = StateManager()
+            wallet_val = sm.get_current_wallet_balance()
+            wallet_str = f"Rs {wallet_val:,.2f} INR"
+        except Exception:
+            pass
+
+        # Fetch today's trade count
+        trade_count = "0"
+        try:
+            from execution.state_manager import StateManager
+            sm = StateManager()
+            trades = sm.get_todays_trades()
+            trade_count = str(len(trades))
+        except Exception:
+            pass
+
+        status_msg = (
+            "[SYSTEM STATUS REPORT]\n"
+            "========================================\n"
+            f"Market Window       : {market_state}\n"
+            f"Live Wallet Balance : {wallet_str}\n"
+            f"Engine State        : {engine_state}\n"
+            f"Live Trades Today   : {trade_count}\n"
+            f"Timestamp           : {now.strftime('%Y-%m-%d %H:%M:%S')} IST\n"
+            "========================================"
+        )
+        bot.reply_to(message, status_msg)
+
+    @bot.message_handler(commands=["report", "reports"])
     def cmd_report(message):
-        """Send today's EOD report as an HTML document attachment."""
+        # /report and /reports work ANYTIME (both when market is open and closed)
         import glob
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         reports_dir = os.path.join(base_dir, "reports")
 
-        # Find the latest report file (prefer live, fallback to dry-run)
         today_str = datetime.date.today().strftime("%Y%m%d")
         candidates = [
             os.path.join(reports_dir, f"EOD_Report_LIVE_{today_str}.html"),
-            os.path.join(reports_dir, f"EOD_Report_DRYRUN_{today_str}.html"),
             os.path.join(reports_dir, f"LIVE_MARKET_REPORT_{today_str}.html"),
             os.path.join(reports_dir, "LIVE_MARKET_REPORT.html"),
         ]
 
-        # Also search for any recent HTML report
-        all_reports = sorted(glob.glob(os.path.join(reports_dir, "*.html")), key=os.path.getmtime, reverse=True)
+        # Filter strictly for live reports (excluding dry-run reports)
+        all_reports = [f for f in sorted(glob.glob(os.path.join(reports_dir, "*.html")), key=os.path.getmtime, reverse=True) if "DRYRUN" not in os.path.basename(f)]
 
         sent = False
         for report_path in candidates + all_reports:
             if os.path.exists(report_path):
                 try:
                     with open(report_path, "rb") as doc:
-                        bot.send_document(message.chat.id, doc, caption=f"[EOD REPORT] {os.path.basename(report_path)}")
+                        bot.send_document(message.chat.id, doc, caption=f"[LIVE EOD REPORT] {os.path.basename(report_path)}")
                     sent = True
-                    _safe_print(f"[Telegram Control] Report sent: {os.path.basename(report_path)}")
+                    _safe_print(f"[Telegram Control] Live report sent: {os.path.basename(report_path)}")
                     break
                 except Exception as e:
                     bot.reply_to(message, f"[ERROR] Failed to send report: {e}")
                     return
 
         if not sent:
-            bot.reply_to(message, "[NO REPORTS] No EOD report files found yet. Run the pipeline first.")
+            bot.reply_to(message, "[NO REPORTS] No live market EOD report files found yet for today.")
 
     @bot.message_handler(commands=["trades"])
     def cmd_trades(message):
-        """Send today's executed trade history as a text summary."""
+        # /trades works ANYTIME (both when market is open and closed)
         try:
             from execution.state_manager import StateManager
             sm = StateManager()
             trades = sm.get_todays_trades()
 
             if not trades:
-                bot.reply_to(message, "[TRADES] No trades executed today.")
+                bot.reply_to(message, "[TRADES] No live trades executed today.")
                 return
 
-            lines = [f"[TODAY'S TRADE LOG] ({len(trades)} trades)\n========================================"]
+            lines = [f"[TODAY'S LIVE TRADE LOG] ({len(trades)} trades)\n========================================"]
             total_pnl = 0.0
             for i, t in enumerate(trades, 1):
                 symbol = t.get("option_contract", {}).get("option_symbol", "N/A")
@@ -198,11 +227,11 @@ def _register_handlers(bot):
                 lines.append(
                     f"\nTrade #{i}: {symbol}\n"
                     f"  Entry: Rs {entry:.2f} | Exit: Rs {exit_p:.2f}\n"
-                    f"  PnL: {'+'if pnl>=0 else ''}Rs {pnl:,.2f} | {reason}"
+                    f"  PnL: {'+' if pnl>=0 else ''}Rs {pnl:,.2f} | {reason}"
                 )
 
             lines.append(f"\n========================================")
-            lines.append(f"NET DAILY PnL: {'+'if total_pnl>=0 else ''}Rs {total_pnl:,.2f} INR")
+            lines.append(f"NET DAILY PnL: {'+' if total_pnl>=0 else ''}Rs {total_pnl:,.2f} INR")
 
             bot.reply_to(message, "\n".join(lines))
         except Exception as e:
@@ -216,7 +245,7 @@ def is_bot_disabled() -> bool:
 
 def start_telegram_listener_background():
     """
-    Starts the Telegram bot polling in a non-blocking daemon background thread.
+    Starts the Telegram bot polling in a non-blocking background thread.
     Safe to call multiple times -- only the first call starts the listener.
     """
     global _listener_started
@@ -233,11 +262,10 @@ def start_telegram_listener_background():
         return
 
     def _polling_loop():
-        _safe_print("[Telegram Control] Cloud polling listener started. Listening 24/7 for /status, /report, /trades, /stop, /resume...")
+        _safe_print("[Telegram Control] Cloud polling listener started. Listening 24/7 for /status, /report, /reports, /trades, /stop, /resume...")
         import time
         while True:
             try:
-                # Use extended timeouts suited for cloud platforms like Railway
                 bot.infinity_polling(timeout=30, long_polling_timeout=20)
             except Exception as e:
                 _safe_print(f"[Telegram Control Warning] Polling glitch: {e}. Auto-reconnecting in 5s...")
@@ -256,9 +284,9 @@ if __name__ == "__main__":
     _safe_print(f"  BOT TOKEN : {'SET (' + TELEGRAM_BOT_TOKEN[:12] + '...)' if TELEGRAM_BOT_TOKEN else 'NOT SET'}")
     _safe_print(f"  CHAT ID   : {'SET (' + TELEGRAM_CHAT_ID + ')' if TELEGRAM_CHAT_ID else 'NOT SET'}")
     _safe_print(f"  KILL FLAG : {'ACTIVE' if os.path.exists(BOT_DISABLED_FLAG) else 'CLEAR'}")
+    _safe_print(f"  MARKET    : {'OPEN' if check_is_market_open() else 'CLOSED'}")
     _safe_print("")
     _safe_print("  Starting foreground polling (Ctrl+C to exit)...")
-    _safe_print("  Send /start, /status, /stop, or /resume from Telegram.")
     _safe_print("=" * 70)
 
     bot = _get_bot()

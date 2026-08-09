@@ -1,1 +1,1 @@
-worker: python main.py --live --daemon --auto-approve
+worker: python main.py --daemon --auto-approve
