@@ -63,6 +63,8 @@ def _register_handlers(bot):
             "-------------------------------------------\n"
             "Available Commands:\n"
             "/status  - Live Wallet Balance & Bot Health\n"
+            "/report  - Download today's EOD HTML report\n"
+            "/trades  - View today's executed trade log\n"
             "/stop    - Emergency Pause (Kill Switch)\n"
             "/resume  - Re-enable Trading Engine\n"
             "/help    - Show this help message\n"
@@ -136,6 +138,75 @@ def _register_handlers(bot):
             _safe_print("[Telegram Control] Trading engine RESUMED via Telegram /resume command.")
         except Exception as e:
             bot.reply_to(message, f"[ERROR] Failed to resume: {e}")
+
+    @bot.message_handler(commands=["report"])
+    def cmd_report(message):
+        """Send today's EOD report as an HTML document attachment."""
+        import glob
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        reports_dir = os.path.join(base_dir, "reports")
+
+        # Find the latest report file (prefer live, fallback to dry-run)
+        today_str = datetime.date.today().strftime("%Y%m%d")
+        candidates = [
+            os.path.join(reports_dir, f"EOD_Report_LIVE_{today_str}.html"),
+            os.path.join(reports_dir, f"EOD_Report_DRYRUN_{today_str}.html"),
+            os.path.join(reports_dir, f"LIVE_MARKET_REPORT_{today_str}.html"),
+            os.path.join(reports_dir, "LIVE_MARKET_REPORT.html"),
+        ]
+
+        # Also search for any recent HTML report
+        all_reports = sorted(glob.glob(os.path.join(reports_dir, "*.html")), key=os.path.getmtime, reverse=True)
+
+        sent = False
+        for report_path in candidates + all_reports:
+            if os.path.exists(report_path):
+                try:
+                    with open(report_path, "rb") as doc:
+                        bot.send_document(message.chat.id, doc, caption=f"[EOD REPORT] {os.path.basename(report_path)}")
+                    sent = True
+                    _safe_print(f"[Telegram Control] Report sent: {os.path.basename(report_path)}")
+                    break
+                except Exception as e:
+                    bot.reply_to(message, f"[ERROR] Failed to send report: {e}")
+                    return
+
+        if not sent:
+            bot.reply_to(message, "[NO REPORTS] No EOD report files found yet. Run the pipeline first.")
+
+    @bot.message_handler(commands=["trades"])
+    def cmd_trades(message):
+        """Send today's executed trade history as a text summary."""
+        try:
+            from execution.state_manager import StateManager
+            sm = StateManager()
+            trades = sm.get_todays_trades()
+
+            if not trades:
+                bot.reply_to(message, "[TRADES] No trades executed today.")
+                return
+
+            lines = [f"[TODAY'S TRADE LOG] ({len(trades)} trades)\n========================================"]
+            total_pnl = 0.0
+            for i, t in enumerate(trades, 1):
+                symbol = t.get("option_contract", {}).get("option_symbol", "N/A")
+                entry = t.get("entry_premium", 0.0)
+                exit_p = t.get("exit_premium", 0.0)
+                pnl = t.get("net_pnl", 0.0)
+                reason = t.get("exit_reason", "OPEN")
+                total_pnl += pnl
+                lines.append(
+                    f"\nTrade #{i}: {symbol}\n"
+                    f"  Entry: Rs {entry:.2f} | Exit: Rs {exit_p:.2f}\n"
+                    f"  PnL: {'+'if pnl>=0 else ''}Rs {pnl:,.2f} | {reason}"
+                )
+
+            lines.append(f"\n========================================")
+            lines.append(f"NET DAILY PnL: {'+'if total_pnl>=0 else ''}Rs {total_pnl:,.2f} INR")
+
+            bot.reply_to(message, "\n".join(lines))
+        except Exception as e:
+            bot.reply_to(message, f"[ERROR] Could not fetch trades: {e}")
 
 
 def is_bot_disabled() -> bool:
