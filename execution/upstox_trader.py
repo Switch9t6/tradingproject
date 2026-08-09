@@ -166,16 +166,31 @@ class UpstoxOptionsTrader:
             print(f"  Target (+25%) / SL (-12%): Rs {target_price:.2f} / Rs {initial_stop_price:.2f}")
             print("!" * 75)
             
-            try:
-                user_input = input("\n👉 Do you authorize placing this order? [Y/n]: ").strip().lower()
-            except Exception:
-                user_input = "y"
+            approved = False
+            from execution.telegram_control import request_telegram_trade_approval, TELEGRAM_BOT_TOKEN
+            if TELEGRAM_BOT_TOKEN and not TELEGRAM_BOT_TOKEN.startswith("your_"):
+                print("\n📱 [TELEGRAM PROMPT SENT] Waiting 60s for user confirmation on Telegram...")
+                approved = request_telegram_trade_approval(
+                    option_symbol=option_symbol,
+                    lot_size=lot_size,
+                    entry_premium=entry_premium,
+                    total_cost=entry_premium * lot_size,
+                    target_price=target_price,
+                    stop_price=initial_stop_price,
+                    timeout_seconds=60
+                )
+            else:
+                try:
+                    user_input = input("\n👉 Do you authorize placing this order? [Y/n]: ").strip().lower()
+                    approved = user_input in ["y", "yes", ""]
+                except Exception:
+                    approved = True
                 
-            if user_input not in ["y", "yes", ""]:
-                print("\n⛔ [USER DECISION] Order placement REJECTED by user. Trade execution aborted.")
+            if not approved:
+                print("\n⛔ [USER DECISION] Order placement REJECTED or TIMED OUT. Trade execution aborted.")
                 return None
             else:
-                print("\n✅ [USER APPROVED] Trade execution authorized by user. Proceeding with order placement...\n")
+                print("\n✅ [USER APPROVED] Trade execution authorized. Proceeding with order placement...\n")
 
         # 3. Place Aggressive Limit Order & Attach 5-Second Fill Verification Loop
         if not self.dry_run:

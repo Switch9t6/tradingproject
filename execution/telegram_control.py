@@ -11,11 +11,12 @@ Market Hours Enforcement (09:15 AM to 03:15 PM IST):
   - /start, /help, /stop, /resume return: "market is closed try during 9:15 AM to 3:15 PM"
   - /status, /report, /reports, /trades remain ACTIVE to view live stats and reports.
 - When market is OPEN (Mon-Fri 09:15 AM - 03:15 PM IST):
-  - /start executes: python main.py --live --auto-approve in background thread.
+  - /start executes: python main.py --live in background thread.
 """
 
 import os
 import sys
+import uuid
 import threading
 import datetime
 import subprocess
@@ -32,6 +33,9 @@ BOT_DISABLED_FLAG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath
 # Module-level bot instance
 _bot = None
 _listener_started = False
+
+# Registry for pending order approvals: { trade_id: { "event": threading.Event(), "approved": False } }
+_pending_approvals = {}
 
 
 def _safe_print(text: str):
@@ -63,6 +67,88 @@ def _build_action_keyboard(telebot_module):
     markup.add(btn_trades)
     markup.add(btn_stop, btn_resume)
     return markup
+
+
+def request_telegram_trade_approval(
+    option_symbol: str,
+    lot_size: int,
+    entry_premium: float,
+    total_cost: float,
+    target_price: float,
+    stop_price: float,
+    timeout_seconds: int = 60
+) -> bool:
+    """
+    Sends an interactive Telegram order approval prompt with [✅ Approve Order] and [❌ Reject Order] inline buttons.
+    Waits up to timeout_seconds (default 60s) for user tap.
+    Returns True if approved, False if rejected or timed out.
+    """
+    bot = _get_bot()
+    if not bot or not TELEGRAM_CHAT_ID:
+        _safe_print("[Telegram Control] Bot token or Chat ID missing. Skipping Telegram approval prompt.")
+        return False
+
+    import telebot
+
+    trade_id = str(uuid.uuid4())[:8]
+    event = threading.Event()
+    _pending_approvals[trade_id] = {"event": event, "approved": False}
+
+    msg_text = (
+        "⚠️ [INTERACTIVE ORDER APPROVAL REQUIRED]\n"
+        "========================================\n"
+        f"Contract       : {option_symbol}\n"
+        f"Quantity       : {lot_size} shares (1 Lot)\n"
+        f"Entry Premium  : Rs {entry_premium:.2f} / share\n"
+        f"Total Cost     : Rs {total_cost:,.2f} INR\n"
+        f"Target (+25%)  : Rs {target_price:.2f}\n"
+        f"Stop Loss (-12%): Rs {stop_price:.2f}\n"
+        "========================================\n"
+        "Do you authorize placing this real order on Upstox?"
+    )
+
+    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+    btn_yes = telebot.types.InlineKeyboardButton("✅ Approve Order (YES)", callback_data=f"approve_{trade_id}")
+    btn_no = telebot.types.InlineKeyboardButton("❌ Reject Order (NO)", callback_data=f"reject_{trade_id}")
+    markup.add(btn_yes, btn_no)
+
+    try:
+        sent_msg = bot.send_message(TELEGRAM_CHAT_ID, msg_text, reply_markup=markup)
+        _safe_print(f"[Telegram Control] Sent interactive order approval prompt to Telegram (ID: {trade_id}). Waiting {timeout_seconds}s...")
+    except Exception as e:
+        _safe_print(f"[Telegram Control Error] Could not send approval prompt: {e}")
+        _pending_approvals.pop(trade_id, None)
+        return False
+
+    # Wait up to timeout_seconds for user to tap [Approve] or [Reject]
+    is_set = event.wait(timeout=timeout_seconds)
+
+    approval_record = _pending_approvals.pop(trade_id, None)
+    is_approved = approval_record["approved"] if (approval_record and is_set) else False
+
+    try:
+        if is_approved:
+            bot.edit_message_text(
+                f"✅ [ORDER APPROVED] {option_symbol} (Rs {total_cost:,.2f}) authorized by user. Order executing on Upstox...",
+                TELEGRAM_CHAT_ID,
+                sent_msg.message_id
+            )
+        elif not is_set:
+            bot.edit_message_text(
+                f"⏰ [APPROVAL TIMED OUT] Request for {option_symbol} timed out after {timeout_seconds}s. Order aborted safely.",
+                TELEGRAM_CHAT_ID,
+                sent_msg.message_id
+            )
+        else:
+            bot.edit_message_text(
+                f"❌ [ORDER REJECTED] {option_symbol} rejected by user via Telegram. Trade execution aborted.",
+                TELEGRAM_CHAT_ID,
+                sent_msg.message_id
+            )
+    except Exception:
+        pass
+
+    return is_approved
 
 
 def _get_bot():
@@ -98,7 +184,7 @@ def _register_handlers(bot):
 
         def _run_pipeline_job():
             try:
-                cmd = [sys.executable, "main.py", "--live", "--auto-approve"]
+                cmd = [sys.executable, "main.py", "--live"]
                 _safe_print(f"[Telegram Control] Executing command via /start: {' '.join(cmd)}")
                 subprocess.run(cmd, check=True)
             except Exception as e:
@@ -280,7 +366,17 @@ def _register_handlers(bot):
     # Callback Query Handler for Interactive Inline Buttons
     @bot.callback_query_handler(func=lambda call: True)
     def handle_callback_query(call):
-        if call.data == "cb_status":
+        if call.data.startswith("approve_"):
+            trade_id = call.data.split("approve_")[1]
+            if trade_id in _pending_approvals:
+                _pending_approvals[trade_id]["approved"] = True
+                _pending_approvals[trade_id]["event"].set()
+        elif call.data.startswith("reject_"):
+            trade_id = call.data.split("reject_")[1]
+            if trade_id in _pending_approvals:
+                _pending_approvals[trade_id]["approved"] = False
+                _pending_approvals[trade_id]["event"].set()
+        elif call.data == "cb_status":
             cmd_status(call.message)
         elif call.data == "cb_report":
             cmd_report(call.message)
