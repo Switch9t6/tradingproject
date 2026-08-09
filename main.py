@@ -171,15 +171,36 @@ if __name__ == "__main__":
     parser.add_argument("--override-daily-limit", "--force-trade", action="store_true", help="Manual override: Bypass 1 trade per day limit to allow additional trades")
     parser.add_argument("--auto-approve", "--yes", action="store_true", help="Auto-approve trade orders without interactive confirmation prompt")
     parser.add_argument("--reset-state", action="store_true", help="Force reset daily state lock for a fresh simulation run")
+    parser.add_argument("--daemon", action="store_true", help="Run in continuous 24/7 cloud daemon mode for Railway deployment")
     parser.add_argument("--tsl-scenario", type=str, default="AUTO", choices=["AUTO", "STEP1_BREAKEVEN_HIT", "STEP2_PROFIT_LOCK_HIT", "TIME_DECAY_EXIT", "STOP_LOSS_HIT", "TARGET_HIT"], help="Simulate specific position exit scenario in dry-run mode")
     args = parser.parse_args()
     
     is_dry_run = not args.live if args.live else (args.dry_run or True)
+    
+    # 1. Start Non-Blocking Telegram Control Listener
+    start_telegram_listener_background()
+
+    # 2. Run Main Trading Pipeline
     run_daily_pipeline(
         dry_run=is_dry_run,
         reset_state=args.reset_state,
         sim_scenario=args.tsl_scenario,
         micro_capital=args.micro_capital,
-        override_daily_limit=args.override_daily_limit,
+        override_daily_limit=override_daily_limit if 'override_daily_limit' in locals() else args.override_daily_limit,
         auto_approve=args.auto_approve
     )
+
+    # 3. Railway / Cloud 24/7 Server Daemon Loop
+    # Detects Railway deployment automatically or if --daemon flag is set
+    is_cloud_env = args.daemon or bool(os.getenv("RAILWAY_ENVIRONMENT")) or bool(os.getenv("RAILWAY_PROJECT_ID")) or bool(os.getenv("PORT"))
+    if is_cloud_env:
+        print("\n" + "=" * 80)
+        print("  [CLOUD DAEMON ACTIVE] Engine running in 24/7 background worker mode on Railway.")
+        print("  [TELEGRAM CONTROL] Polling listener stays ONLINE 24/7 for /status, /report, /trades, /stop, /resume.")
+        print("=" * 80)
+        try:
+            while True:
+                time.sleep(30)
+        except KeyboardInterrupt:
+            print("\n[Cloud Daemon] Stopping worker process...")
+

@@ -233,11 +233,15 @@ def start_telegram_listener_background():
         return
 
     def _polling_loop():
-        _safe_print("[Telegram Control] Background polling listener started. Listening for /status, /stop, /resume...")
-        try:
-            bot.infinity_polling(timeout=10, long_polling_timeout=5)
-        except Exception as e:
-            _safe_print(f"[Telegram Control] Polling loop error: {e}")
+        _safe_print("[Telegram Control] Cloud polling listener started. Listening 24/7 for /status, /report, /trades, /stop, /resume...")
+        import time
+        while True:
+            try:
+                # Use extended timeouts suited for cloud platforms like Railway
+                bot.infinity_polling(timeout=30, long_polling_timeout=20)
+            except Exception as e:
+                _safe_print(f"[Telegram Control Warning] Polling glitch: {e}. Auto-reconnecting in 5s...")
+                time.sleep(5)
 
     t = threading.Thread(target=_polling_loop, daemon=True)
     t.start()

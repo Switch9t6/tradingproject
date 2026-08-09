@@ -240,6 +240,83 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             padding: 40px;
             color: var(--text-muted);
         }
+
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            border-radius: 8px;
+        }
+
+        /* Mobile Responsiveness Rules */
+        @media (max-width: 768px) {
+            body { padding: 12px 8px; }
+            .container { width: 100%; }
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                padding: 16px 14px;
+                gap: 12px;
+            }
+            .header-title h1 { font-size: 20px; line-height: 1.3; }
+            .header-subtitle { font-size: 12px; }
+            .badges {
+                flex-wrap: wrap;
+                gap: 6px;
+                width: 100%;
+            }
+            .badge {
+                font-size: 10px;
+                padding: 4px 10px;
+            }
+            .metrics-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+                margin-bottom: 16px;
+            }
+            .metric-card {
+                padding: 14px 12px;
+            }
+            .metric-label {
+                font-size: 10px;
+                margin-bottom: 4px;
+            }
+            .metric-value {
+                font-size: 18px;
+            }
+            .metric-subtext {
+                font-size: 10px;
+            }
+            .card-table {
+                padding: 14px 10px;
+            }
+            .table-title {
+                font-size: 15px;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 4px;
+            }
+            table {
+                min-width: 650px;
+                font-size: 12px;
+            }
+            th, td {
+                padding: 10px 8px;
+                white-space: nowrap;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .metrics-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .metric-card {
+                padding: 10px 8px;
+            }
+            .metric-value {
+                font-size: 16px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -298,6 +375,7 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
 
             {% if trades %}
+            <div class="table-responsive">
             <table>
                 <thead>
                     <tr>
@@ -340,6 +418,7 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
             {% else %}
             <div class="empty-state">
                 <p>No real live market option trades have been executed yet today.</p>
