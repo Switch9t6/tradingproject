@@ -10,6 +10,7 @@ from scanner.option_mapper import resolve_atm_option_contract
 from scanner.news_filter import can_trade_during_news_window
 from scanner.macro_sector_engine import MacroSectorNewsEngine
 from execution.upstox_trader import UpstoxOptionsTrader
+from execution.telegram_control import start_telegram_listener_background, is_bot_disabled
 from reporting.eod_reporter import generate_eod_report
 from config.settings import INITIAL_WALLET_CAPITAL, MAX_SINGLE_LOT_PREMIUM_BUDGET, MICRO_CAPITAL_BUDGET_CAP, MAX_DAILY_TRADES
 
@@ -85,6 +86,9 @@ def run_daily_pipeline(
     print(f"      Approval Guardrail: {'INTERACTIVE USER CONFIRMATION REQUIRED' if not auto_approve else 'AUTO-APPROVED'}")
     print("=" * 80)
 
+    # Launch Telegram Background Command Listener (Non-Blocking)
+    start_telegram_listener_background()
+
     # Security Audit Check
     security_audit_check()
 
@@ -137,6 +141,13 @@ def run_daily_pipeline(
     print("\n[09:31 AM - 02:30 PM] STEP 4: EXECUTION GATEWAY")
     print("  |-- IF Composite Score >= 75 / 100: Executing Aggressive Limit Order on Upstox.")
     print("  \\-- Monitoring Position using 30-Min Stagnation Exit & Step-Based TSL...")
+
+    # Check Telegram Remote Kill Switch (/stop)
+    if is_bot_disabled():
+        print("[PAUSED] Remote Telegram kill switch (/stop) is active. Skipping trade execution.")
+        print("[PAUSED] Send /resume on Telegram to re-enable trading.")
+        generate_eod_report(dry_run=dry_run)
+        return
     
     trader = UpstoxOptionsTrader(access_token=access_token, dry_run=dry_run, force_reset=reset_state)
     trade_result = trader.execute_option_trade(
