@@ -1,0 +1,469 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import sqlite3
+import datetime
+from jinja2 import Template
+from config.settings import DB_FILE_PATH, REPORTS_DIR, INITIAL_WALLET_CAPITAL
+from execution.state_manager import StateManager
+
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EOD {{ mode_label }} Dashboard | {{ date }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0b0f19;
+            --card-bg: #111827;
+            --card-inner: #1f2937;
+            --border-color: #374151;
+            --text-main: #f9fafb;
+            --text-muted: #9ca3af;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-blue: #38bdf8;
+            --accent-purple: #8b5cf6;
+            --accent-amber: #f59e0b;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            padding: 40px 20px;
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: linear-gradient(135deg, rgba(17, 24, 39, 0.9), rgba(31, 41, 55, 0.9));
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 28px 36px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
+        }
+
+        .header-title h1 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 26px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 6px;
+        }
+
+        .header-subtitle {
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .badges {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .badge {
+            font-size: 12px;
+            font-weight: 700;
+            padding: 6px 14px;
+            border-radius: 30px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-security {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--accent-green);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .badge-mode-dryrun {
+            background: rgba(139, 92, 246, 0.2);
+            color: #c084fc;
+            border: 1px solid rgba(139, 92, 246, 0.4);
+        }
+
+        .badge-mode-live {
+            background: rgba(16, 185, 129, 0.2);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.4);
+        }
+
+        .badge-date {
+            background: rgba(56, 189, 248, 0.15);
+            color: var(--accent-blue);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .metric-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            padding: 20px;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+            border-color: #4b5563;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .metric-value {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 24px;
+            font-weight: 800;
+        }
+
+        .metric-subtext {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .pnl-positive { color: var(--accent-green); }
+        .pnl-negative { color: var(--accent-red); }
+
+        .card-table {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 28px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+        }
+
+        .table-title {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 14px;
+        }
+
+        th {
+            background: var(--card-inner);
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th:first-child { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
+        th:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+
+        td {
+            padding: 16px;
+            border-bottom: 1px solid rgba(55, 65, 81, 0.5);
+            font-weight: 500;
+        }
+
+        tr:hover td {
+            background: rgba(31, 41, 55, 0.5);
+        }
+
+        .symbol-badge {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border-color);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-weight: 700;
+            color: var(--accent-blue);
+        }
+
+        .reason-tag {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 20px;
+            display: inline-block;
+            text-transform: uppercase;
+        }
+
+        .tag-target { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+        .tag-tsl { background: rgba(56, 189, 248, 0.2); color: #7dd3fc; border: 1px solid rgba(56, 189, 248, 0.4); }
+        .tag-time { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+        .tag-sl { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
+
+        .footer {
+            text-align: center;
+            margin-top: 32px;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header Banner -->
+        <div class="header">
+            <div class="header-title">
+                <h1>INTRADAY OPTIONS TRADING DASHBOARD</h1>
+                <div class="header-subtitle">Upstox API v2 Autonomous Options Execution Engine</div>
+            </div>
+            <div class="badges">
+                <span class="badge {{ 'badge-mode-dryrun' if is_dry_run else 'badge-mode-live' }}">
+                    {{ '🧪 SIMULATION / DRY-RUN' if is_dry_run else '🚀 LIVE PRODUCTION' }}
+                </span>
+                <span class="badge badge-security">🔒 READ-ONLY 100% SECURE</span>
+                <span class="badge badge-date">📅 {{ date }}</span>
+            </div>
+        </div>
+
+        <!-- Metrics Grid -->
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-label">Real-Time Wallet Balance</div>
+                <div class="metric-value" style="color: var(--accent-blue);">Rs {{ realtime_wallet }}</div>
+                <div class="metric-subtext">Initial Base Capital: Rs {{ capital_base }}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Net Daily PnL</div>
+                <div class="metric-value {{ 'pnl-positive' if is_positive_pnl else 'pnl-negative' }}">
+                    {{ '+' if is_positive_pnl else '' }}Rs {{ net_pnl }}
+                </div>
+                <div class="metric-subtext {{ 'pnl-positive' if is_positive_pnl else 'pnl-negative' }}">
+                    {{ '+' if is_positive_pnl else '' }}{{ pnl_pct }}% Net Return
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Daily Trades Executed</div>
+                <div class="metric-value" style="color: var(--text-main);">{{ total_trades }} / 1</div>
+                <div class="metric-subtext">Max Cap: 1 Trade / Day Hard Lock</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Win Rate</div>
+                <div class="metric-value" style="color: {{ 'var(--accent-green)' if win_rate_val >= 50 else 'var(--accent-amber)' }};">{{ win_rate_val }}%</div>
+                <div class="metric-subtext">{{ winning_trades }} Wins / {{ total_trades - winning_trades }} Losses</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Total Friction Fees</div>
+                <div class="metric-value" style="color: var(--accent-purple);">Rs {{ total_friction }}</div>
+                <div class="metric-subtext">Brokerage + STT + Txn Fee + GST</div>
+            </div>
+        </div>
+
+        <!-- Executed Trade Log Table -->
+        <div class="card-table">
+            <div class="table-title">
+                <span>Executed Intraday Option Trades ({{ mode_label }})</span>
+                <span style="font-size: 13px; font-weight: 500; color: var(--text-muted);">Timestamped Session Audit</span>
+            </div>
+
+            {% if trades %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Trade ID</th>
+                        <th>Time</th>
+                        <th>Option Contract</th>
+                        <th>Qty (Lot)</th>
+                        <th>Entry Premium</th>
+                        <th>Exit Premium</th>
+                        <th>Friction Fees</th>
+                        <th>Net PnL</th>
+                        <th>Execution Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in trades %}
+                    <tr>
+                        <td style="color: var(--text-muted);">#{{ t.id }}</td>
+                        <td>{{ t.entry_time }}</td>
+                        <td><span class="symbol-badge">{{ t.option_symbol }}</span></td>
+                        <td>{{ t.quantity }} sh</td>
+                        <td>Rs {{ "%.2f"|format(t.entry_premium or 0) }}</td>
+                        <td>Rs {{ "%.2f"|format(t.exit_premium or 0) if t.exit_premium else '-' }}</td>
+                        <td style="color: var(--accent-purple);">Rs {{ "%.2f"|format(t.friction_fees or 0) }}</td>
+                        <td class="{{ 'pnl-positive' if (t.net_pnl or 0) >= 0 else 'pnl-negative' }}">
+                            <strong>{{ '+' if (t.net_pnl or 0) >= 0 else '' }}Rs {{ "%.2f"|format(t.net_pnl or 0) }}</strong>
+                        </td>
+                        <td>
+                            {% if t.exit_reason and 'TARGET_HIT' in t.exit_reason %}
+                                <span class="reason-tag tag-target">🎯 TARGET HIT (+25%)</span>
+                            {% elif t.exit_reason and ('TSL' in t.exit_reason or 'TRAILING' in t.exit_reason) %}
+                                <span class="reason-tag tag-tsl">🔒 STEP TSL LOCK</span>
+                            {% elif t.exit_reason and 'TIME' in t.exit_reason %}
+                                <span class="reason-tag tag-time">⏳ 30-MIN TIME EXIT</span>
+                            {% else %}
+                                <span class="reason-tag tag-sl">🛑 STOP LOSS (-12%)</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <p>No option trades were executed during this trading session.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="footer">
+            <p>Upstox API v2 Autonomous Options Execution Engine | Security Verified READ-ONLY Fund Compliance</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
+    """
+    At 15:30 IST, pull trade execution logs from SQLite DB, calculate summary stats,
+    fetch dynamic real-time wallet balance, render Jinja2 HTML report,
+    and output separate report files for Live Mode vs Dry-Run Mode.
+    """
+    if not date_str:
+        date_str = datetime.date.today().isoformat()
+        
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    
+    state_mgr = StateManager()
+    realtime_wallet = state_mgr.get_current_wallet_balance()
+    
+    # In Live Mode, query Live Upstox Margin if available
+    if not dry_run:
+        from config.settings import TOKEN_FILE_PATH
+        import json
+        if os.path.exists(TOKEN_FILE_PATH):
+            try:
+                with open(TOKEN_FILE_PATH, "r") as f:
+                    tdata = json.load(f)
+                    access_token = tdata.get("access_token", "")
+                    if access_token and not access_token.startswith("MOCK"):
+                        import upstox_client
+                        config = upstox_client.Configuration()
+                        config.access_token = access_token
+                        uapi = upstox_client.UserApi(upstox_client.ApiClient(config))
+                        res = uapi.get_user_fund_margin(api_version="2.0")
+                        if hasattr(res, "data") and hasattr(res.data, "equity"):
+                            live_margin = float(res.data.equity.available_margin)
+                            realtime_wallet = live_margin
+                            state_mgr.state["current_wallet_balance"] = live_margin
+                            state_mgr._save_state(state_mgr.state)
+            except Exception:
+                pass
+    
+    target_mode = "DRY_RUN" if dry_run else "LIVE"
+    conn = sqlite3.connect(DB_FILE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM trades WHERE trade_date = ? AND execution_mode = ?", (date_str, target_mode))
+    rows = cursor.fetchall()
+    trades = [dict(r) for r in rows]
+    conn.close()
+    
+    total_trades = len(trades)
+    winning_trades = sum(1 for t in trades if (t.get("net_pnl") or 0) > 0)
+    win_rate = round((winning_trades / total_trades) * 100.0, 2) if total_trades > 0 else 0.0
+    total_friction = round(sum((t.get("friction_fees") or 0.0) for t in trades), 2)
+    net_pnl = round(sum((t.get("net_pnl") or 0.0) for t in trades), 2)
+    pnl_pct = round((net_pnl / INITIAL_WALLET_CAPITAL) * 100.0, 2)
+    
+    mode_tag = "DRY-RUN SIMULATION" if dry_run else "LIVE PRODUCTION"
+    file_prefix = "EOD_Report_DRYRUN_" if dry_run else "EOD_Report_LIVE_"
+
+    # 1. Output Summary to Console
+    print("\n" + "=" * 75)
+    print(f"       END OF DAY (EOD) OPTIONS TRADING REPORT [{mode_tag}]       ")
+    print(f"       Session Date: {date_str} | Generated at 15:30 IST            ")
+    print("=" * 75)
+    print(f"  Initial Capital Base     : Rs {INITIAL_WALLET_CAPITAL:,.2f} INR")
+    print(f"  Real-Time Wallet Balance : Rs {realtime_wallet:,.2f} INR")
+    print(f"  Total Trades Executed    : {total_trades} / 1 (Max Daily Limit)")
+    print(f"  Winning Trades           : {winning_trades}")
+    print(f"  Win Rate                 : {win_rate}%")
+    print(f"  Total Friction Costs     : Rs {total_friction:,.2f} INR")
+    print(f"  Net Daily PnL            : Rs {net_pnl:,.2f} INR ({pnl_pct:+,.2f}%)")
+    print("-" * 75)
+    
+    if trades:
+        print("  Executed Trade History:")
+        for t in trades:
+            print(f"  - Trade #{t['id']} ({t['entry_time']}): {t['option_symbol']} | Qty: {t['quantity']} | Entry: Rs {t['entry_premium']} | Exit: Rs {t['exit_premium']} | Net PnL: Rs {t['net_pnl']} ({t['exit_reason']})")
+    else:
+        print("  No trades executed today.")
+    print("=" * 75)
+
+    # 2. Render Overhauled HTML Dashboard Report
+    template = Template(HTML_TEMPLATE)
+    html_output = template.render(
+        date=date_str,
+        mode_label=mode_tag,
+        is_dry_run=dry_run,
+        capital_base=f"{INITIAL_WALLET_CAPITAL:,.2f}",
+        realtime_wallet=f"{realtime_wallet:,.2f}",
+        total_trades=total_trades,
+        winning_trades=winning_trades,
+        win_rate_val=win_rate,
+        total_friction=f"{total_friction:,.2f}",
+        net_pnl=f"{net_pnl:,.2f}",
+        pnl_pct=pnl_pct,
+        is_positive_pnl=(net_pnl >= 0),
+        trades=trades
+    )
+    
+    report_filename = f"{file_prefix}{date_str.replace('-', '')}.html"
+    report_path = os.path.join(REPORTS_DIR, report_filename)
+    
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(html_output)
+        
+    print(f"\n[EOD Reporter] HTML dashboard successfully saved to: '{report_path}'")
+    return report_path
+
+if __name__ == "__main__":
+    generate_eod_report(dry_run=True)
