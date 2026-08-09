@@ -221,7 +221,31 @@ class UpstoxOptionsTrader:
             execution_mode=mode_label
         )
 
-        return self._monitor_and_manage_position(trade_id, option_contract, entry_premium, target_price, initial_stop_price, sim_scenario)
+        # Trigger Telegram Trade Entry Alert
+        from reporting.telegram_bot import send_trade_entry_alert, send_trade_exit_alert
+        send_trade_entry_alert({
+            "option_symbol": option_symbol,
+            "lot_size": lot_size,
+            "entry_premium": entry_premium,
+            "target_price": target_price,
+            "initial_stop_loss": initial_stop_price,
+            "composite_score": option_contract.get("composite_rating", {}).get("composite_score", 80.0),
+            "execution_mode": mode_label
+        }, wallet_balance=available_cash)
+
+        result = self._monitor_and_manage_position(trade_id, option_contract, entry_premium, target_price, initial_stop_price, sim_scenario)
+
+        # Trigger Telegram Trade Exit Alert
+        send_trade_exit_alert({
+            "option_symbol": option_symbol,
+            "entry_premium": entry_premium,
+            "exit_premium": result.get("exit_premium", entry_premium),
+            "net_pnl": result.get("net_pnl", 0.0),
+            "exit_reason": result.get("exit_reason", "EXIT"),
+            "execution_mode": mode_label
+        }, wallet_balance=self.state_mgr.get_current_wallet_balance())
+
+        return result
 
     def _monitor_and_manage_position(
         self,
