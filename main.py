@@ -157,6 +157,7 @@ def run_daily_pipeline(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Master Daily Orchestrator for Intraday Options Trading Bot")
+    parser.add_argument("--live", action="store_true", help="Run live market trading mode (Default)")
     parser.add_argument("--micro-capital", action="store_true", help="Enable Micro-Capital Live Test mode with Rs 250 budget cap")
     parser.add_argument("--override-daily-limit", "--force-trade", action="store_true", help="Manual override: Bypass 1 trade per day limit to allow additional trades")
     parser.add_argument("--auto-approve", "--yes", action="store_true", help="Auto-approve trade orders without interactive confirmation prompt")

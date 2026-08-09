@@ -5,16 +5,19 @@ Runs a Telegram Bot polling loop continuously so that incoming
 Telegram commands (/start, /status, /report, /reports, /trades, /stop, /resume)
 are handled instantly while the main trading pipeline executes in parallel.
 
-Market Hours Enforcement:
-- When market is CLOSED (outside Mon-Fri 09:15 - 15:30 IST):
-  - /start, /resume, /stop return "Market is closed."
+Market Hours Enforcement (09:15 AM to 03:15 PM IST):
+- When market is CLOSED (outside Mon-Fri 09:15 AM - 03:15 PM IST):
+  - /start, /help, /stop, /resume return: "market is closed try during 9:15 AM to 3:15 PM"
   - /status, /report, /reports, /trades remain ACTIVE to view live stats and reports.
+- When market is OPEN (Mon-Fri 09:15 AM - 03:15 PM IST):
+  - /start executes: python main.py --live --auto-approve in background thread.
 """
 
 import os
 import sys
 import threading
 import datetime
+import subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -39,12 +42,12 @@ def _safe_print(text: str):
 
 
 def check_is_market_open() -> bool:
-    """Validates whether current time is within official NSE trading window (Mon-Fri 09:15 - 15:30 IST)."""
+    """Validates whether current time is within official NSE trading window (Mon-Fri 09:15 AM - 03:15 PM IST)."""
     now = datetime.datetime.now()
     if now.weekday() >= 5: # 5 = Saturday, 6 = Sunday
         return False
     current_time = now.time()
-    return datetime.time(9, 15) <= current_time <= datetime.time(15, 30)
+    return datetime.time(9, 15) <= current_time <= datetime.time(15, 15)
 
 
 def _get_bot():
@@ -64,23 +67,41 @@ def _get_bot():
 def _register_handlers(bot):
     """Register all Telegram command handlers on the bot instance."""
 
-    @bot.message_handler(commands=["start", "help"])
+    @bot.message_handler(commands=["start"])
     def cmd_start(message):
         if not check_is_market_open():
-            bot.reply_to(
-                message,
-                "Market is closed (NSE Operating Window: Mon-Fri 09:15 - 15:30 IST).\n\n"
-                "Off-market available commands:\n"
-                "/status - View Live Wallet & Engine Health\n"
-                "/report - Download Live EOD Report\n"
-                "/trades - View Today's Executed Trade Log"
-            )
+            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM")
             return
-            
+
+        bot.reply_to(
+            message,
+            "🚀 [EXECUTING ENGINE] Launching trading pipeline ('python main.py --live')...\n\n"
+            "System scanning top-ranked sectors & quantitative multi-factor matrix."
+        )
+
+        def _run_pipeline_job():
+            try:
+                cmd = [sys.executable, "main.py", "--live", "--auto-approve"]
+                _safe_print(f"[Telegram Control] Executing command via /start: {' '.join(cmd)}")
+                subprocess.run(cmd, check=True)
+            except Exception as e:
+                _safe_print(f"[Telegram Control Error] Execution failed: {e}")
+
+        # Run pipeline in a background thread so Telegram listener stays non-blocking
+        t = threading.Thread(target=_run_pipeline_job, daemon=True)
+        t.start()
+
+    @bot.message_handler(commands=["help"])
+    def cmd_help(message):
+        if not check_is_market_open():
+            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM")
+            return
+
         help_text = (
             "[UPSTOX LIVE ALGORITHMIC ENGINE]\n"
             "-------------------------------------------\n"
             "Available Commands:\n"
+            "/start   - Launch live trading pipeline ('python main.py --live')\n"
             "/status  - Live Wallet Balance & Bot Health\n"
             "/report  - Download today's Live EOD HTML report\n"
             "/trades  - View today's executed trade log\n"
@@ -95,9 +116,9 @@ def _register_handlers(bot):
     @bot.message_handler(commands=["stop"])
     def cmd_stop(message):
         if not check_is_market_open():
-            bot.reply_to(message, "Market is closed.")
+            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM")
             return
-            
+
         try:
             with open(BOT_DISABLED_FLAG, "w") as f:
                 f.write("DISABLED_BY_TELEGRAM")
@@ -114,9 +135,9 @@ def _register_handlers(bot):
     @bot.message_handler(commands=["resume"])
     def cmd_resume(message):
         if not check_is_market_open():
-            bot.reply_to(message, "Market is closed.")
+            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM")
             return
-            
+
         try:
             if os.path.exists(BOT_DISABLED_FLAG):
                 os.remove(BOT_DISABLED_FLAG)
@@ -134,7 +155,7 @@ def _register_handlers(bot):
         # /status works ANYTIME (both when market is open and closed)
         now = datetime.datetime.now()
         market_open = check_is_market_open()
-        market_state = "OPEN (Trading Window Active)" if market_open else "CLOSED (Mon-Fri 09:15 - 15:30 IST)"
+        market_state = "OPEN (Trading Window Active)" if market_open else "CLOSED (Mon-Fri 09:15 AM - 03:15 PM IST)"
         is_paused = os.path.exists(BOT_DISABLED_FLAG)
         engine_state = "PAUSED (Kill Switch Active)" if is_paused else ("ONLINE & SCANNING" if market_open else "STANDBY (Market Closed)")
 
@@ -262,7 +283,7 @@ def start_telegram_listener_background():
         return
 
     def _polling_loop():
-        _safe_print("[Telegram Control] Cloud polling listener started. Listening 24/7 for /status, /report, /reports, /trades, /stop, /resume...")
+        _safe_print("[Telegram Control] Cloud polling listener started. Listening 24/7 for /start, /status, /report, /reports, /trades, /stop, /resume...")
         import time
         while True:
             try:
@@ -284,7 +305,7 @@ if __name__ == "__main__":
     _safe_print(f"  BOT TOKEN : {'SET (' + TELEGRAM_BOT_TOKEN[:12] + '...)' if TELEGRAM_BOT_TOKEN else 'NOT SET'}")
     _safe_print(f"  CHAT ID   : {'SET (' + TELEGRAM_CHAT_ID + ')' if TELEGRAM_CHAT_ID else 'NOT SET'}")
     _safe_print(f"  KILL FLAG : {'ACTIVE' if os.path.exists(BOT_DISABLED_FLAG) else 'CLEAR'}")
-    _safe_print(f"  MARKET    : {'OPEN' if check_is_market_open() else 'CLOSED'}")
+    _safe_print(f"  MARKET    : {'OPEN (09:15 AM - 03:15 PM IST)' if check_is_market_open() else 'CLOSED'}")
     _safe_print("")
     _safe_print("  Starting foreground polling (Ctrl+C to exit)...")
     _safe_print("=" * 70)
