@@ -7,16 +7,15 @@ from jinja2 import Template
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config.settings import DB_FILE_PATH, REPORTS_DIR, TOKEN_FILE_PATH, INITIAL_WALLET_CAPITAL
+from config.settings import DB_FILE_PATH, REPORTS_DIR, TOKEN_FILE_PATH, INITIAL_WALLET_CAPITAL, DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN
 from execution.state_manager import StateManager
-import upstox_client
 
 LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>LIVE Upstox Audit Dashboard | {{ date }}</title>
+    <title>DhanHQ Live Audit Dashboard | {{ date }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -539,134 +538,148 @@ def extract_equity_margin(res) -> tuple[float, float]:
         print(f"[Margin Parsing Exception] {e}")
     return 1258.0, 0.0
 
-def fetch_upstox_live_trades_fallback(access_token: str) -> list:
+def fetch_dhan_live_balance_for_report() -> tuple:
     """
-    Queries Upstox API Order Book to fetch actual live executed orders for today.
+    Queries DhanHQ API get_fund_limits() to fetch live available cash balance.
+    Returns (available_balance, utilized_amount).
     """
-    if not access_token or access_token.startswith("MOCK"):
-        return []
     try:
-        config = upstox_client.Configuration()
-        config.access_token = access_token
-        order_api = upstox_client.OrderApi(upstox_client.ApiClient(config))
-        res = order_api.get_order_book(api_version="2.0")
-        book_data = getattr(res, "data", res)
-        orders = book_data if isinstance(book_data, list) else []
-        
+        from dhanhq import dhanhq, DhanContext
+        client_id = DHAN_CLIENT_ID or os.getenv("DHAN_CLIENT_ID", "")
+        token = DHAN_ACCESS_TOKEN or os.getenv("DHAN_ACCESS_TOKEN", "")
+
+        token_file = "access_token.json" if os.path.exists("access_token.json") else TOKEN_FILE_PATH
+        if (not token or token.startswith("MOCK")) and os.path.exists(token_file):
+            with open(token_file, "r") as f:
+                tdata = json.load(f)
+                token = tdata.get("access_token", token)
+                client_id = tdata.get("client_id", client_id)
+
+        if not token or token.startswith("MOCK"):
+            return 0.0, 0.0
+
+        ctx = DhanContext(client_id, token)
+        dhan = dhanhq(ctx)
+        res = dhan.get_fund_limits()
+        data = res.get("data", {}) if isinstance(res, dict) else {}
+        avail = float(data.get("availabelBalance") or data.get("availableBalance") or 0.0)
+        utilized = float(data.get("utilizedAmount") or 0.0)
+        return avail, utilized
+    except Exception as e:
+        print(f"[Live Reporter - Dhan Balance Notice] {e}")
+    return 0.0, 0.0
+
+
+def fetch_dhan_live_order_book_trades_for_report(date_str: str) -> list:
+    """
+    Queries DhanHQ API get_order_list() to fetch executed trades for today.
+    """
+    try:
+        from dhanhq import dhanhq, DhanContext
+        client_id = DHAN_CLIENT_ID or os.getenv("DHAN_CLIENT_ID", "")
+        token = DHAN_ACCESS_TOKEN or os.getenv("DHAN_ACCESS_TOKEN", "")
+
+        token_file = "access_token.json" if os.path.exists("access_token.json") else TOKEN_FILE_PATH
+        if (not token or token.startswith("MOCK")) and os.path.exists(token_file):
+            with open(token_file, "r") as f:
+                tdata = json.load(f)
+                token = tdata.get("access_token", token)
+                client_id = tdata.get("client_id", client_id)
+
+        if not token or token.startswith("MOCK"):
+            return []
+
+        ctx = DhanContext(client_id, token)
+        dhan = dhanhq(ctx)
+        res = dhan.get_order_list()
+        orders = res.get("data", []) if isinstance(res, dict) else []
+        if not isinstance(orders, list):
+            return []
+
         trades = []
-        buy_orders = [o for o in orders if str(getattr(o, "status", "") if not isinstance(o, dict) else o.get("status", "")).lower() == "complete" and (getattr(o, "transaction_type", "") if not isinstance(o, dict) else o.get("transaction_type", "")) == "BUY"]
-        sell_orders = [o for o in orders if str(getattr(o, "status", "") if not isinstance(o, dict) else o.get("status", "")).lower() == "complete" and (getattr(o, "transaction_type", "") if not isinstance(o, dict) else o.get("transaction_type", "")) == "SELL"]
+        buy_orders = [o for o in orders if isinstance(o, dict) and o.get("transactionType") == "BUY"
+                      and str(o.get("orderStatus", "")).upper() in ("TRADED", "FILLED", "SUCCESS", "EXECUTED")
+                      and date_str in str(o.get("createTime", ""))]
+        sell_orders = [o for o in orders if isinstance(o, dict) and o.get("transactionType") == "SELL"
+                       and str(o.get("orderStatus", "")).upper() in ("TRADED", "FILLED", "SUCCESS", "EXECUTED")
+                       and date_str in str(o.get("createTime", ""))]
 
         for i, b in enumerate(buy_orders, 1):
-            sym = getattr(b, "trading_symbol", None) or (b.get("trading_symbol") if isinstance(b, dict) else "NIFTY_OPTION")
-            entry_p = float(getattr(b, "average_price", 0.0) if not isinstance(b, dict) else b.get("average_price", 0.0))
-            qty = int(getattr(b, "quantity", 0) if not isinstance(b, dict) else b.get("quantity", 0))
-            entry_t = getattr(b, "order_timestamp", "09:30:00") if not isinstance(b, dict) else b.get("order_timestamp", "09:30:00")
-            if " " in str(entry_t):
-                entry_t = str(entry_t).split(" ")[1]
+            sym = b.get("tradingSymbol", "OPTION")
+            entry_p = float(b.get("price") or b.get("averageTradedPrice") or 0.0)
+            qty = int(b.get("quantity") or 0)
+            entry_t = str(b.get("createTime", "")).split(" ")[-1] or "09:30:00"
 
             s = sell_orders[i-1] if i-1 < len(sell_orders) else None
-            exit_p = float(getattr(s, "average_price", entry_p) if not isinstance(s, dict) else s.get("average_price", entry_p)) if s else entry_p
-            exit_t = getattr(s, "order_timestamp", "15:15:00") if s and not isinstance(s, dict) else (s.get("order_timestamp", "15:15:00") if s else "OPEN")
-            if s and " " in str(exit_t):
-                exit_t = str(exit_t).split(" ")[1]
+            exit_p = float(s.get("price") or s.get("averageTradedPrice") or entry_p) if s else entry_p
+            exit_t = str(s.get("createTime", "")).split(" ")[-1] if s else "OPEN"
 
             from reporting.friction_calculator import calculate_trade_friction
             f_res = calculate_trade_friction(qty, entry_p, exit_p)
             gross_pnl = f_res["gross_pnl"]
             friction = f_res["total_friction"]
-            net_pnl = f_res["net_pnl"]
+            net_pnl_val = f_res["net_pnl"]
 
-            # Detect Manual Exit vs Automated System Exit
-            s_tag = getattr(s, "tag", None) if s and not isinstance(s, dict) else (s.get("tag") if s else None)
+            target_p = round(entry_p * 1.25, 2)
+            stop_p = round(entry_p * 0.88, 2)
             if s:
-                if not s_tag or s_tag != "OPTIONS_BOT":
-                    reason = "MANUAL"
+                if exit_p >= target_p:
+                    reason = "TARGET_HIT_+25%"
+                elif exit_p <= stop_p:
+                    reason = "STOP_LOSS_HIT"
                 else:
-                    target_p = round(entry_p * 1.25, 2)
-                    stop_p = round(entry_p * 0.88, 2)
-                    if exit_p >= target_p:
-                        reason = "TARGET_HIT_+25%"
-                    elif exit_p <= stop_p:
-                        reason = "STOP_LOSS_HIT"
-                    else:
-                        reason = "MANUAL"
+                    reason = "MANUAL_EXIT"
             else:
                 reason = "ACTIVE_HOLD"
 
             trades.append({
                 "id": i,
-                "trade_date": datetime.date.today().isoformat(),
+                "trade_date": date_str,
                 "entry_time": entry_t,
                 "exit_time": exit_t,
                 "execution_mode": "LIVE",
-                "underlying_symbol": "NIFTY",
+                "underlying_symbol": sym.split("_")[0] if "_" in sym else sym,
                 "option_symbol": sym,
-                "option_type": "CE",
-                "strike_price": 24900.0,
+                "option_type": "CE" if sym.endswith("CE") else "PE",
+                "strike_price": 0.0,
                 "quantity": qty,
                 "entry_premium": entry_p,
                 "exit_premium": exit_p,
-                "target_price": round(entry_p * 1.25, 2),
-                "stop_price": round(entry_p * 0.88, 2),
+                "target_price": target_p,
+                "stop_price": stop_p,
                 "gross_pnl": gross_pnl,
                 "friction_fees": friction,
-                "net_pnl": net_pnl,
+                "net_pnl": net_pnl_val,
                 "status": "CLOSED" if s else "OPEN",
                 "exit_reason": reason
             })
         return trades
     except Exception as e:
-        print(f"[Report Live Fallback Notice] {e}")
+        print(f"[Report Live Dhan Fallback Notice] {e}")
         return []
 
 def generate_live_market_report(date_str: str = None) -> str:
     """
-    Fetches actual real-time Upstox account margin directly from Upstox API v2
+    Fetches actual real-time DhanHQ account balance directly from Dhan API v2
     and queries SQLite DB strictly for 'LIVE' execution_mode trade records.
     EXCLUDES all dry-run, mock, or simulated data.
     """
     if not date_str:
         date_str = datetime.date.today().isoformat()
-        
+
     os.makedirs(REPORTS_DIR, exist_ok=True)
-    
-    # 1. Query Actual Upstox Live Fund Margin
-    live_balance = 1258.0
-    used_margin = 0.0
-    active_token = ""
-    
-    token_file = "access_token.json" if os.path.exists("access_token.json") else TOKEN_FILE_PATH
-    if os.path.exists(token_file):
-        try:
-            token = ""
-            if token_file.endswith(".json"):
-                with open(token_file, "r") as f:
-                    tdata = json.load(f)
-                    token = tdata.get("access_token", "")
-            else:
-                with open(token_file, "r") as f:
-                    token = f.read().strip()
 
-            if token and not token.startswith("MOCK"):
-                active_token = token
-                config = upstox_client.Configuration()
-                config.access_token = token
-                uapi = upstox_client.UserApi(upstox_client.ApiClient(config))
-                res = uapi.get_user_fund_margin(api_version="2.0")
-                avail_m, used_m = extract_equity_margin(res)
-                if avail_m > 0:
-                    live_balance = avail_m
-                    used_margin = used_m
-        except Exception as e:
-            print(f"[Live Reporter Warning] Could not fetch live margin from Upstox: {e}")
+    # 1. Query Actual DhanHQ Live Fund Balance
+    live_balance, used_margin = fetch_dhan_live_balance_for_report()
+    if live_balance <= 0:
+        live_balance = INITIAL_WALLET_CAPITAL
 
-    # Synchronize state.json with actual live balance
+    # Sync state.json with actual live balance
     state_mgr = StateManager()
     state_mgr.state["current_wallet_balance"] = live_balance
     state_mgr._save_state(state_mgr.state)
 
-    # 2. Query Database STRICTLY for LIVE execution_mode trades
+    # 2. Query Database strictly for LIVE execution_mode trades
     trades = []
     try:
         conn = sqlite3.connect(DB_FILE_PATH)
@@ -679,9 +692,9 @@ def generate_live_market_report(date_str: str = None) -> str:
     except Exception:
         pass
 
-    # Fallback to Upstox API Live Order Book if local DB is empty
-    if not trades and active_token:
-        trades = fetch_upstox_live_trades_fallback(active_token)
+    # Fallback: fetch live trades from DhanHQ Order Book API
+    if not trades:
+        trades = fetch_dhan_live_order_book_trades_for_report(date_str)
     
     total_trades = len(trades)
     winning_trades = sum(1 for t in trades if (t.get("net_pnl") or 0) > 0)
@@ -691,11 +704,11 @@ def generate_live_market_report(date_str: str = None) -> str:
 
     # 3. Output Pure Live Console Audit
     print("\n" + "=" * 75)
-    print(f"       REAL-TIME UPSTOX LIVE MARKET AUDIT REPORT [LIVE MODE ONLY]      ")
+    print(f"       REAL-TIME DHANHQ LIVE MARKET AUDIT REPORT [LIVE MODE ONLY]      ")
     print(f"       Session Date: {date_str} | Generated at {datetime.datetime.now().strftime('%H:%M:%S')} IST      ")
     print("=" * 75)
-    print(f"  Actual Upstox Live Cash Balance : Rs {live_balance:,.2f} INR")
-    print(f"  Used Margin                     : Rs {used_margin:,.2f} INR")
+    print(f"  DhanHQ Live Cash Balance  : Rs {live_balance:,.2f} INR")
+    print(f"  Used Margin               : Rs {used_margin:,.2f} INR")
     print(f"  Live Real Trades Executed       : {total_trades} / 1")
     print(f"  Winning Live Trades             : {winning_trades}")
     print(f"  Live Win Rate                   : {win_rate}%")
