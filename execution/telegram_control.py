@@ -545,15 +545,23 @@ def _register_handlers(bot):
 
             web_app_url = f"{base_url}/report?token={session_token}"
 
+            import html
+            escaped_url = html.escape(web_app_url)
+
+            is_https = base_url.startswith("https://") and "localhost" not in base_url and "127.0.0.1" not in base_url
+
+            msg_text = (
+                "📊 <b>[QUANT PERFORMANCE REPORT DASHBOARD]</b>\n"
+                "========================================\n"
+            )
+
             try:
                 from reports.trade_report import get_trade_report_data
                 data = get_trade_report_data()
                 net_pnl = data["net_pnl"]
                 pnl_str = f"+Rs {net_pnl:,.2f}" if net_pnl >= 0 else f"-Rs {abs(net_pnl):,.2f}"
 
-                msg_text = (
-                    "📊 <b>[QUANT PERFORMANCE REPORT DASHBOARD]</b>\n"
-                    "========================================\n"
+                msg_text += (
                     f"<b>Today's Trades  :</b> {data['total_trades']} (NSE: {data['nse_trades']} | MCX: {data['mcx_trades']})\n"
                     f"<b>Win Rate        :</b> {data['win_rate']}%\n"
                     f"<b>Net Realized PnL:</b> <code>{pnl_str} INR</code>\n"
@@ -561,31 +569,24 @@ def _register_handlers(bot):
                     "========================================\n"
                 )
             except Exception:
-                msg_text = "📊 <b>[QUANT PERFORMANCE REPORT DASHBOARD]</b>\n========================================\n"
+                pass
 
-            is_local = ("localhost" in base_url or "127.0.0.1" in base_url or not base_url.startswith("https://"))
+            msg_text += (
+                f'👉 <a href="{escaped_url}"><b>Open Interactive Performance Report</b></a> 👈\n\n'
+                f'<code>{escaped_url}</code>\n\n'
+                "<i>Tap the link above to view interactive dashboard & download PDF reports.</i>"
+            )
 
-            if is_local:
-                msg_text += (
-                    "🌐 <b>Interactive Web Dashboard URL:</b>\n"
-                    f'<a href="{web_app_url}">{web_app_url}</a>\n\n'
-                    "<i>Open the link above in your browser to view the interactive dashboard & download PDFs.</i>"
-                )
-                bot.reply_to(message, msg_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
-            else:
+            if is_https:
                 try:
-                    full_text = msg_text + "Tap below to open the interactive performance web dashboard or download custom date range PDFs:"
                     markup = telebot.types.InlineKeyboardMarkup(row_width=1)
                     btn_web = telebot.types.InlineKeyboardButton("📊 Open Interactive Performance Report", url=web_app_url)
                     markup.add(btn_web)
-                    bot.reply_to(message, full_text, parse_mode="HTML", reply_markup=markup)
+                    bot.reply_to(message, msg_text, parse_mode="HTML", reply_markup=markup)
                 except Exception as btn_err:
-                    # Fallback if Telegram API rejects inline button URL
-                    full_text = msg_text + (
-                        "\n🌐 <b>Report URL:</b>\n"
-                        f'<a href="{web_app_url}">{web_app_url}</a>'
-                    )
-                    bot.reply_to(message, full_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
+                    bot.reply_to(message, msg_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
+            else:
+                bot.reply_to(message, msg_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
 
             _safe_print(f"[Telegram Control] Sent interactive report URL: {web_app_url}")
         except Exception as e:
