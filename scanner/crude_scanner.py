@@ -237,7 +237,7 @@ def scan_mcx_crude_oil(access_token: str, dry_run: bool = False) -> Optional[Dic
     direction = "BULLISH" if is_bullish else "BEARISH"
     option_type = "CE" if is_bullish else "PE"
     
-    composite_score = round(75.0 + (min(atr_14_val / MCX_CRUDE_MIN_ATR, 2.0) * 10.0), 2)
+    composite_score = round(80.0 + (min(atr_14_val / MCX_CRUDE_MIN_ATR, 2.0) * 10.0), 2)
 
     candidate = {
         "symbol": MCX_CRUDE_SYMBOL,
