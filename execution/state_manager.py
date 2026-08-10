@@ -143,6 +143,43 @@ class StateManager:
             return True
         return False
 
+    def reconcile_state_with_db(self):
+        """
+        Self-healing state reconciliation:
+        Checks actual recorded trades in SQLite database for today.
+        If 0 actual trades exist for NSE_FO or MCX_FO in DB, clears invalid session locks in state.json!
+        """
+        try:
+            trades = self.get_today_trades()
+            
+            nse_trades = [t for t in trades if ("NSE" in str(t.get("exchange", "")).upper() or "BANK" in str(t.get("option_symbol", "")).upper() or "NIFTY" in str(t.get("option_symbol", "")).upper())]
+            mcx_trades = [t for t in trades if ("MCX" in str(t.get("exchange", "")).upper() or "CRUDE" in str(t.get("option_symbol", "")).upper() or "CRUDE" in str(t.get("underlying_symbol", "")).upper())]
+            
+            actual_nse_count = len(nse_trades)
+            actual_mcx_count = len(mcx_trades)
+            
+            state_changed = False
+            
+            if self.state.get("NSE_FO_trades_today", 0) > actual_nse_count:
+                self.state["NSE_FO_trades_today"] = actual_nse_count
+                state_changed = True
+            if actual_nse_count == 0 and self.state.get("is_nse_locked_today"):
+                self.state["is_nse_locked_today"] = False
+                state_changed = True
+                
+            if self.state.get("MCX_FO_trades_today", 0) > actual_mcx_count:
+                self.state["MCX_FO_trades_today"] = actual_mcx_count
+                state_changed = True
+            if actual_mcx_count == 0 and self.state.get("is_mcx_locked_today"):
+                self.state["is_mcx_locked_today"] = False
+                state_changed = True
+
+            if state_changed:
+                print(f"[State Reconciled] Corrected session state from DB truth (NSE Trades: {actual_nse_count}, MCX Trades: {actual_mcx_count}).")
+                self._save_state(self.state)
+        except Exception as e:
+            print(f"[State Reconcile Notice] {e}")
+
     def is_trade_allowed_today(self, exchange: str = "NSE_FO", override_daily_limit: bool = False) -> bool:
         """
         ENFORCE DYNAMIC SESSION GATES:
@@ -150,6 +187,7 @@ class StateManager:
         - Before executing an MCX Crude Oil trade: Verify MCX_FO_trades_today < 1 & not is_mcx_locked_today.
         """
         self._check_date_reset()
+        self.reconcile_state_with_db()
         if self.is_drawdown_limit_exceeded():
             return False
 

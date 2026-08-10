@@ -119,13 +119,19 @@ def run_mcx_crude_pipeline(
         print("[MCX Pipeline] Outside MCX market hours. Session 2 pipeline halted.")
         return
 
-    # 3. Authentication & Access Token
+    # 3. Check Session Cap Lockout BEFORE Scanning Market
+    state_mgr.reconcile_state_with_db()
+    if not state_mgr.is_trade_allowed_today(exchange="MCX_FO", override_daily_limit=override_daily_limit):
+        print(f"[MCX Pipeline Lockout] Session 2 MCX Crude cap reached for today. Skipping market scan.")
+        return
+
+    # 4. Authentication & Access Token
     access_token = run_oauth_flow(dry_run=False)
     if not access_token:
         print("[Error] Failed to acquire valid access token for MCX Session.")
         return
 
-    # 4. Scan MCX Crude Oil Multi-Factor 100-Point Matrix via Smart Scanner
+    # 5. Scan MCX Crude Oil Multi-Factor 100-Point Matrix via Smart Scanner
     candidate = scan_smart_opportunities(
         access_token=access_token,
         session_override="mcx",
@@ -229,6 +235,12 @@ def run_daily_pipeline(
     if not can_trade_during_news_window():
         print("[Pipeline] Scheduled high-impact macro news event blackout active. Pipeline complete.")
         generate_eod_report(dry_run=False)
+        return
+
+    # Pre-Scan Session Cap Check
+    state_mgr.reconcile_state_with_db()
+    if not state_mgr.is_trade_allowed_today(exchange="NSE_FO", override_daily_limit=override_daily_limit):
+        print(f"[NSE Pipeline Lockout] Session 1 NSE Equity cap reached for today. Skipping market scan.")
         return
 
     # STEP 2: MACRO & SECTOR NEWS SCORER
