@@ -450,18 +450,41 @@ def _register_handlers(bot):
             pass
 
         status_msg = (
-            "[DUAL-SESSION SYSTEM STATUS]\n"
+            "[DHAN DUAL-SESSION SYSTEM STATUS]\n"
             "========================================\n"
             f"Active Session      : {active_session_str}\n"
             f"Session 1 (NSE)     : {'ONLINE' if nse_active else 'CLOSED (09:00 - 15:30 IST)'}\n"
             f"Session 2 (MCX)     : {'ONLINE' if mcx_active else 'CLOSED (17:00 - 23:15 IST)'}\n"
-            f"Live Wallet Balance : {wallet_str}\n"
+            f"💰 [Dhan Live Wallet] Balance: {wallet_str} | Broker: DhanHQ API v2\n"
             f"Engine State        : {engine_state}\n"
             f"Live Trades Today   : {trade_count}\n"
-            f"Timestamp           : {now.strftime('%Y-%m-%d %H:%M:%S')} IST\n"
             "========================================"
         )
         bot.reply_to(message, status_msg, reply_markup=_build_action_keyboard(telebot))
+
+    @bot.message_handler(commands=["settoken"])
+    def cmd_settoken(message):
+        try:
+            parts = message.text.strip().split()
+            if len(parts) < 2:
+                bot.reply_to(message, "⚠️ Usage: `/settoken <YOUR_24HR_DHAN_ACCESS_TOKEN>`", parse_mode="Markdown")
+                return
+            new_token = parts[1].strip()
+            os.environ["DHAN_ACCESS_TOKEN"] = new_token
+            from config.settings import TOKEN_FILE_PATH
+            import json
+            token_payload = {
+                "access_token": new_token,
+                "updated_at": datetime.datetime.now().isoformat(),
+                "updated_via": "telegram_settoken"
+            }
+            os.makedirs(os.path.dirname(TOKEN_FILE_PATH), exist_ok=True)
+            with open(TOKEN_FILE_PATH, "w") as f:
+                json.dump(token_payload, f, indent=4)
+            bot.reply_to(message, "✅ <b>[Dhan Access Token Updated]</b>\nNew 24-hour Dhan Access Token saved & activated successfully!", parse_mode="HTML")
+            _safe_print("[Telegram Control] Dhan Access Token updated live via Telegram /settoken command.")
+        except Exception as e:
+            bot.reply_to(message, f"❌ Failed to update Dhan token: {e}")
 
     @bot.message_handler(commands=["report", "reports"])
     def cmd_report(message):

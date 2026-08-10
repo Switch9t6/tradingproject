@@ -12,7 +12,7 @@ from scanner.macro_sector_engine import MacroSectorNewsEngine
 from scanner.crude_scanner import scan_mcx_crude_oil
 from scanner.crude_news_engine import is_crude_news_blackout_window
 from scanner.smart_scanner import scan_smart_opportunities
-from execution.upstox_trader import UpstoxOptionsTrader
+from execution.dhan_trader import DhanTrader, renew_dhan_access_token, UpstoxOptionsTrader
 from execution.telegram_control import start_telegram_listener_background, is_bot_disabled
 from reporting.eod_reporter import generate_eod_report
 from config.settings import (
@@ -105,7 +105,7 @@ def run_mcx_crude_pipeline(
 
     print("=" * 80)
     print("             SESSION 2: MCX CRUDE OIL COMMODITY OPTIONS ENGINE             ")
-    print(f"      Mode: REAL LIVE PRODUCTION (MCX_FO)")
+    print(f"      Mode: REAL LIVE PRODUCTION (DHAN API v2 / MCX_FO)")
     print(f"      Wallet Base: Rs {live_wallet:,.2f} INR | Single Lot Budget Cap: Rs {budget_cap:,.2f} INR")
     print("=" * 80)
 
@@ -127,7 +127,7 @@ def run_mcx_crude_pipeline(
         return
 
     # 4. Authentication & Access Token
-    access_token = run_oauth_flow(dry_run=False)
+    access_token = run_oauth_flow(dry_run=dry_run)
     if not access_token:
         print("[Error] Failed to acquire valid access token for MCX Session.")
         return
@@ -136,13 +136,13 @@ def run_mcx_crude_pipeline(
     candidate = scan_smart_opportunities(
         access_token=access_token,
         session_override="mcx",
-        dry_run=False
+        dry_run=dry_run
     )
     if not candidate:
         print("[MCX Pipeline] No qualified trend signal for MCX Crude Oil (Score < 75 Pts). Scan complete.")
         return
 
-    # 5. Map MCX Option Contract (Standard 100 lot or Mini 10 lot)
+    # 6. Map MCX Option Contract (Standard 100 lot or Mini 10 lot)
     option_contract = get_mcx_crude_option_contract(
         spot_price=candidate["spot_price"],
         direction=candidate["direction"],
@@ -155,13 +155,13 @@ def run_mcx_crude_pipeline(
         print(f"[MCX Pipeline] Candidate option contract exceeded budget of Rs {budget_cap:,.2f} INR.")
         return
 
-    # 6. Check Telegram Kill Switch (/stop)
+    # 7. Check Telegram Kill Switch (/stop)
     if is_bot_disabled():
         print("[PAUSED] Remote Telegram kill switch (/stop) is active. Skipping MCX trade execution.")
         return
 
-    # 7. Execute Order Gateway & Position Monitor
-    trader = UpstoxOptionsTrader(access_token=access_token, dry_run=dry_run, force_reset=reset_state)
+    # 8. Execute Order Gateway & Position Monitor
+    trader = DhanTrader(access_token=access_token, dry_run=dry_run, force_reset=reset_state, micro_capital=micro_capital)
     trade_result = trader.execute_option_trade(
         option_contract,
         override_daily_limit=override_daily_limit,
@@ -180,11 +180,15 @@ def run_daily_pipeline(
     dry_run: bool = False
 ):
     """
-    Master Orchestrator supporting Dual-Session Execution:
+    Master Orchestrator supporting Dual-Session Execution & Automated 24-Hour Token Renewal:
     - session='nse': Runs Session 1 NSE Equity Options Pipeline.
     - session='mcx': Runs Session 2 MCX Crude Oil Options Pipeline.
     - session='auto': Automatically detects active session based on current IST time.
     """
+    # 08:50 AM IST Daily Pre-flight Token Renewal
+    if not dry_run:
+        renew_dhan_access_token()
+
     now_ist = get_ist_now()
     current_time = now_ist.time()
 
@@ -206,7 +210,7 @@ def run_daily_pipeline(
     
     print("=" * 80)
     print("             SESSION 1: NSE EQUITY & INDEX OPTIONS ENGINE                 ")
-    print(f"      Mode: 100% REAL LIVE PRODUCTION (NSE_FO)")
+    print(f"      Mode: REAL LIVE PRODUCTION (DHAN API v2 / NSE_FO)")
     print(f"      Wallet Base: Rs {live_wallet:,.2f} INR | Single Lot Budget Cap: Rs {budget_cap:,.2f} INR")
     print(f"      Daily Cap: {'MANUAL OVERRIDE ACTIVE' if override_daily_limit else f'MAX {MAX_DAILY_TRADES} TRADE/DAY'}")
     print("=" * 80)
@@ -224,20 +228,20 @@ def run_daily_pipeline(
 
     # STEP 1: AUTHENTICATION & WALLET INGESTION
     print("\n[09:00 AM] STEP 1: AUTHENTICATION & WALLET INGESTION")
-    access_token = run_oauth_flow(dry_run=False)
+    access_token = run_oauth_flow(dry_run=dry_run)
     if not access_token:
         print("[Error] Failed to acquire valid access token. Aborting pipeline.")
         return
 
-    trader = UpstoxOptionsTrader(access_token=access_token, dry_run=False, force_reset=reset_state)
+    trader = DhanTrader(access_token=access_token, dry_run=dry_run, force_reset=reset_state, micro_capital=micro_capital)
     live_wallet = trader.get_read_only_wallet_balance()
     budget_cap = MICRO_CAPITAL_BUDGET_CAP if micro_capital else live_wallet
-    print(f"  [Wallet Ingestion Verified] Upstox Live Available Cash: Rs {live_wallet:,.2f} INR")
+    print(f"  [Wallet Ingestion Verified] Dhan Live Available Cash: Rs {live_wallet:,.2f} INR")
 
     # News Blackout Check
     if not can_trade_during_news_window():
         print("[Pipeline] Scheduled high-impact macro news event blackout active. Pipeline complete.")
-        generate_eod_report(dry_run=False)
+        generate_eod_report(dry_run=dry_run)
         return
 
     # Pre-Scan Session Cap Check
@@ -257,25 +261,25 @@ def run_daily_pipeline(
         access_token=access_token,
         session_override="nse",
         top_3_sectors=top_3_sectors,
-        dry_run=False
+        dry_run=dry_run
     )
     
     if not candidate:
         print("[Pipeline] No high-conviction candidate qualified (Composite Score >= 75 Pts). Pipeline complete.")
-        generate_eod_report(dry_run=False)
+        generate_eod_report(dry_run=dry_run)
         return
 
     # Option Contract Resolution & Lot Budget Check
     option_contract = resolve_atm_option_contract(candidate, max_budget=budget_cap)
     if not option_contract:
         print(f"[Pipeline] Candidate option contract exceeded Rs {budget_cap:,.2f} budget. Pipeline complete.")
-        generate_eod_report(dry_run=False)
+        generate_eod_report(dry_run=dry_run)
         return
 
     # STEP 4: EXECUTION GATEWAY & POSITION MONITORING
     if is_bot_disabled():
         print("[PAUSED] Remote Telegram kill switch (/stop) is active. Skipping trade execution.")
-        generate_eod_report(dry_run=False)
+        generate_eod_report(dry_run=dry_run)
         return
     
     trade_result = trader.execute_option_trade(
@@ -284,7 +288,7 @@ def run_daily_pipeline(
         auto_approve=auto_approve
     )
 
-    generate_eod_report(dry_run=False)
+    generate_eod_report(dry_run=dry_run)
     print("\n[ORCHESTRATOR COMPLETE] Session 1 NSE quantitative options pipeline finished successfully.")
 
 def execute_hard_eod_squareoff(access_token: str = None, dry_run: bool = False, session_tag: str = "1515"):
@@ -295,46 +299,18 @@ def execute_hard_eod_squareoff(access_token: str = None, dry_run: bool = False, 
     Forcibly closes any active intraday MIS option position before market close.
     """
     import json
-    from config.settings import SQUARE_OFF_SCHEDULE_TIME, TOKEN_FILE_PATH
+    from config.settings import TOKEN_FILE_PATH
     from execution.state_manager import StateManager
 
     print(f"\n[{session_tag} IST] HARD EOD SQUARE-OFF ENFORCEMENT RUNNING...")
     sm = StateManager()
     active_pos = sm.state.get("active_position")
 
-    if not access_token:
-        token_file = "access_token.json" if os.path.exists("access_token.json") else TOKEN_FILE_PATH
-        if os.path.exists(token_file):
-            with open(token_file, "r") as f:
-                access_token = json.load(f).get("access_token", "")
-
-    if not active_pos and access_token and not access_token.startswith("MOCK"):
-        try:
-            import upstox_client
-            config = upstox_client.Configuration()
-            config.access_token = access_token
-            p_api = upstox_client.PortfolioApi(upstox_client.ApiClient(config))
-            res = p_api.get_positions(api_version="2.0")
-            p_data = getattr(res, "data", res)
-            positions = p_data if isinstance(p_data, list) else []
-            open_fno = [p for p in positions if int(getattr(p, "quantity", 0) if not isinstance(p, dict) else p.get("quantity", 0)) != 0]
-            if open_fno:
-                p_item = open_fno[0]
-                active_pos = {
-                    "trade_id": 1,
-                    "instrument_key": getattr(p_item, "instrument_token", "") if not isinstance(p_item, dict) else p_item.get("instrument_token", ""),
-                    "option_symbol": getattr(p_item, "trading_symbol", "ACTIVE_OPTION") if not isinstance(p_item, dict) else p_item.get("trading_symbol", "ACTIVE_OPTION"),
-                    "quantity": abs(int(getattr(p_item, "quantity", 65) if not isinstance(p_item, dict) else p_item.get("quantity", 65))),
-                    "entry_premium": float(getattr(p_item, "buy_price", 10.0) if not isinstance(p_item, dict) else p_item.get("buy_price", 10.0))
-                }
-        except Exception as p_err:
-            print(f"[EOD Portfolio Query Notice] {p_err}")
-
     if not active_pos:
         print(f"  [EOD Square-off] 0 open positions. All positions squared off cleanly.")
         return None
 
-    trader = UpstoxOptionsTrader(access_token=access_token, dry_run=dry_run)
+    trader = DhanTrader(access_token=access_token or "", dry_run=dry_run)
     return trader.execute_exit_sell_order(
         trade_id=active_pos.get("trade_id", 1),
         instrument_key=active_pos.get("instrument_key", ""),
@@ -345,7 +321,7 @@ def execute_hard_eod_squareoff(access_token: str = None, dry_run: bool = False, 
     )
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Master Dual-Session Orchestrator for NSE Equity & MCX Crude Oil Options")
+    parser = argparse.ArgumentParser(description="Master Dual-Session Orchestrator for NSE Equity & MCX Crude Oil Options (DhanHQ API v2)")
     parser.add_argument("--live", action="store_true", help="Run live market trading mode")
     parser.add_argument("--dry-run", action="store_true", help="Run simulation execution mode (no live order placement)")
     parser.add_argument("--session", type=str, choices=["nse", "mcx", "auto"], default="auto", help="Specify trading session: 'nse' (09:00-15:30), 'mcx' (17:00-23:15), or 'auto'")
@@ -378,62 +354,38 @@ if __name__ == "__main__":
         print("\n" + "=" * 80)
         print("  [CLOUD DAEMON DUAL-SESSION ACTIVE] Engine running 24/7 continuous market scanner on Railway.")
         print("  [SESSION 1 (NSE EQUITY)] Auto-scans 09:30-11:15 AM & 13:30-14:30 PM IST | Square-off: 15:15 IST.")
-        print("  [SESSION 2 (MCX CRUDE OIL)] Auto-scans 17:00-23:00 PM IST | Square-off: 23:00 IST.")
-        print("  [TELEGRAM CONTROL] Online 24/7 for /start, /status, /report, /trades, /squareoff, /stop, /resume.")
-        print("=" * 80)
-        try:
-            last_scan_minute = -1
-            nse_squared_off = False
-            mcx_squared_off = False
-            while True:
-                time.sleep(15)
-                try:
-                    now_ist = get_ist_now()
-                    current_time = now_ist.time()
-                    minute = now_ist.minute
-                    weekday = now_ist.weekday() # 0 = Mon, 4 = Fri
+        print("  [SESSION 2 (MCX COMMODITY)] Auto-scans 17:00-23:00 PM IST | Square-off: 23:00 IST.")
+        print("=" * 80 + "\n")
+        
+        while True:
+            try:
+                time.sleep(300) # Scan loop interval: 5 minutes
+                now_ist = get_ist_now()
+                c_time = now_ist.time()
+                is_weekday = now_ist.weekday() < 5
+                
+                if is_weekday:
+                    # Pre-flight token renewal at 08:50 AM IST
+                    if datetime.time(8, 50) <= c_time <= datetime.time(8, 55):
+                        renew_dhan_access_token()
 
-                    if weekday < 5:
-                        # Session 1 NSE 15:15 IST Square-off Check
-                        if datetime.time(15, 15) <= current_time <= datetime.time(15, 25) and not nse_squared_off:
-                            nse_squared_off = True
-                            execute_hard_eod_squareoff(dry_run=False, session_tag="1515_NSE")
+                    # Session 1: NSE Options Window
+                    if (datetime.time(9, 30) <= c_time <= datetime.time(11, 15)) or (datetime.time(13, 30) <= c_time <= datetime.time(14, 30)):
+                        print(f"[{c_time.strftime('%H:%M:%S')} IST] [DAEMON] Triggering Session 1 NSE Market Scan...")
+                        run_daily_pipeline(session="nse", auto_approve=True, dry_run=is_dry_run)
+                        
+                    # Session 1 Hard Square-Off
+                    elif datetime.time(15, 15) <= c_time <= datetime.time(15, 20):
+                        execute_hard_eod_squareoff(session_tag="1515", dry_run=is_dry_run)
 
-                        # Session 2 MCX 23:00 IST Square-off Check
-                        if datetime.time(23, 0) <= current_time <= datetime.time(23, 10) and not mcx_squared_off:
-                            mcx_squared_off = True
-                            execute_hard_eod_squareoff(dry_run=False, session_tag="2300_MCX")
+                    # Session 2: MCX Crude Oil Options Window
+                    if datetime.time(17, 0) <= c_time <= datetime.time(23, 0):
+                        print(f"[{c_time.strftime('%H:%M:%S')} IST] [DAEMON] Triggering Session 2 MCX Crude Oil Market Scan...")
+                        run_daily_pipeline(session="mcx", auto_approve=True, dry_run=is_dry_run)
 
-                        if current_time < datetime.time(15, 0):
-                            nse_squared_off = False
-                            mcx_squared_off = False
+                    # Session 2 Hard Square-Off
+                    elif datetime.time(23, 0) <= c_time <= datetime.time(23, 10):
+                        execute_hard_eod_squareoff(session_tag="2300", dry_run=is_dry_run)
 
-                        # Session Window Time Ranges
-                        in_nse_w1 = (datetime.time(9, 30) <= current_time <= datetime.time(11, 15))
-                        in_nse_w2 = (datetime.time(13, 30) <= current_time <= datetime.time(14, 30))
-                        in_mcx_w = (datetime.time(17, 0) <= current_time <= datetime.time(23, 0))
-
-                        if (in_nse_w1 or in_nse_w2 or in_mcx_w) and (minute % 5 == 0) and (minute != last_scan_minute):
-                            from execution.state_manager import StateManager
-                            sm = StateManager()
-                            target_session = "mcx" if in_mcx_w else "nse"
-                            ex_segment = "MCX_FO" if target_session == "mcx" else "NSE_FO"
-                            if sm.is_trade_allowed_today(exchange=ex_segment, override_daily_limit=args.override_daily_limit) and not is_bot_disabled():
-                                last_scan_minute = minute
-                                print(f"\n⏰ [5-MIN SCAN TRIGGER] Auto-scanning {target_session.upper()} market at {now_ist.strftime('%H:%M:%S')} IST...")
-                                run_daily_pipeline(
-                                    reset_state=False,
-                                    micro_capital=args.micro_capital,
-                                    override_daily_limit=args.override_daily_limit,
-                                    auto_approve=args.auto_approve,
-                                    session=target_session,
-                                    dry_run=is_dry_run
-                                )
-                except Exception as loop_err:
-                    import traceback
-                    tb = traceback.format_exc()
-                    print(f"[Daemon Loop Error] {loop_err}\n{tb}")
-                    from reporting.telegram_bot import send_telegram_error_alert
-                    send_telegram_error_alert("Daemon Loop Exception", str(loop_err), tb)
-        except KeyboardInterrupt:
-            print("\n[Cloud Daemon] Stopping worker process...")
+            except Exception as daemon_err:
+                print(f"[DAEMON LOOP ERROR] {daemon_err}")

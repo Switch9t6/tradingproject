@@ -99,50 +99,29 @@ class PositionMonitor:
             print(f"⚠️ [Position Monitor Error] Error evaluating tick: {e}. Retaining active position.")
             return False, self.highest_price_seen, ""
 
-class AsyncUpstoxWebSocketMonitor:
+class AsyncDhanWebSocketMonitor:
     """
-    ASYNC WEBSOCKET TICK STREAMING ENGINE:
-    Streams live tick data for active option contracts via Upstox API V3 WebSocket Feed API
+    ASYNC DHAN MARKET FEED TICK STREAMING ENGINE:
+    Streams live tick data for active option contracts via DhanHQ Feed API / Polling Stream
     with exponential backoff auto-reconnect handling.
     """
     def __init__(self, access_token: str, instrument_key: str, monitor: PositionMonitor):
         self.access_token = access_token
+        self.security_id = str(instrument_key).replace("NSE_FO|", "").replace("MCX_FO|", "")
         self.instrument_key = instrument_key
         self.monitor = monitor
         self.is_connected = False
         self.reconnect_attempts = 0
         self.max_reconnects = 5
 
-    def _fetch_ws_authorized_url(self) -> Optional[str]:
-        """Fetches authorized WebSocket streamer URL from Upstox API v3."""
-        if not self.access_token or self.access_token.startswith("MOCK"):
-            return None
-        try:
-            url = "https://api.upstox.com/v3/feed/market-data-feed/authorize"
-            headers = {
-                "Accept": "application/json",
-                "Authorization": f"Bearer {self.access_token}"
-            }
-            resp = requests.get(url, headers=headers, timeout=5)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data.get("data", {}).get("authorizedRedirectUri")
-        except Exception as e:
-            print(f"[WebSocket Auth Notice] Could not acquire WebSocket auth URI: {e}")
-        return None
-
     async def start_websocket_stream(self, sim_scenario: str = "AUTO", dry_run: bool = False) -> Tuple[float, str]:
         """
-        Connects to Upstox WebSocket Tick Stream, evaluates ticks asynchronously,
+        Connects to Dhan Market Feed / Polling Stream, evaluates ticks asynchronously,
         and reconnects automatically with exponential backoff if network drops.
         """
-        print(f"\n[WebSocket Engine] Launching Async V3 WebSocket Tick Stream for '{self.instrument_key}'...")
+        print(f"\n[Dhan Feed Engine] Launching Async Live Feed Stream for Security ID '{self.security_id}'...")
         self.is_connected = True
         start_time = time.time()
-
-        ws_url = self._fetch_ws_authorized_url()
-        if ws_url:
-            print(f"  [WebSocket Authorized] Upstox V3 Feed Connection Established.")
 
         while self.is_connected:
             try:
@@ -168,27 +147,22 @@ class AsyncUpstoxWebSocketMonitor:
                         self.is_connected = False
                         return exit_p, reason
                 else:
-                    # Live Upstox WebSocket Feed / API Polling Loop (2-Second LTP Intervals)
+                    # Live Dhan Market Quote Polling Loop (2-Second LTP Intervals)
                     await asyncio.sleep(2.0)
                     elapsed = time.time() - start_time
                     
                     current_ltp = self.monitor.highest_price_seen
                     try:
-                        import upstox_client
-                        config = upstox_client.Configuration()
-                        config.access_token = self.access_token
-                        api_client = upstox_client.ApiClient(config)
-                        market_api = upstox_client.MarketDataApi(api_client)
-                        quote_res = market_api.get_market_quote_ltp(symbol=self.instrument_key, api_version="2.0")
-                        data = quote_res.data if hasattr(quote_res, "data") else quote_res
+                        client_id = os.getenv("DHAN_CLIENT_ID", "")
+                        from dhanhq import dhanhq
+                        dhan = dhanhq(client_id, self.access_token)
+                        # Query LTP via Dhan API
+                        q = dhan.get_market_quote_ltp(security_id=self.security_id)
+                        data = q.get("data", q) if isinstance(q, dict) else q
                         if isinstance(data, dict):
-                            token_key = list(data.keys())[0] if data else ""
-                            current_ltp = float(data.get(token_key, {}).get("last_price", self.monitor.highest_price_seen))
-                        elif hasattr(data, self.instrument_key):
-                            item = getattr(data, self.instrument_key)
-                            current_ltp = float(getattr(item, "last_price", self.monitor.highest_price_seen))
+                            current_ltp = float(data.get("last_price") or data.get("ltp") or self.monitor.highest_price_seen)
                     except Exception as poll_err:
-                        print(f"  [LTP Stream Query Notice] {poll_err}")
+                        print(f"  [Dhan LTP Feed Query Notice] {poll_err}")
                     
                     is_exit, exit_p, reason = self.monitor.evaluate_tick(current_ltp, elapsed)
                     if is_exit:
@@ -198,10 +172,14 @@ class AsyncUpstoxWebSocketMonitor:
             except Exception as e:
                 self.reconnect_attempts += 1
                 backoff_delay = min(2.0 ** self.reconnect_attempts, 30.0)
-                print(f"[WebSocket Warning] Stream connection dropped ({e}). Attempting Exponential Backoff Reconnect {self.reconnect_attempts}/{self.max_reconnects} in {backoff_delay:.1f}s...")
+                print(f"[Dhan Feed Warning] Stream connection dropped ({e}). Attempting Exponential Backoff Reconnect {self.reconnect_attempts}/{self.max_reconnects} in {backoff_delay:.1f}s...")
                 if self.reconnect_attempts > self.max_reconnects:
-                    print("❌ [WebSocket Error] Max reconnect attempts exceeded. Falling back to emergency exit level.")
+                    print("❌ [Dhan Feed Error] Max reconnect attempts exceeded. Falling back to emergency exit level.")
                     return self.monitor.current_stop_p, "WEBSOCKET_DISCONNECT_EMERGENCY_EXIT"
                 await asyncio.sleep(backoff_delay)
 
         return self.monitor.entry_premium, "MONITOR_STOPPED"
+
+
+# Alias for backward compatibility
+AsyncUpstoxWebSocketMonitor = AsyncDhanWebSocketMonitor

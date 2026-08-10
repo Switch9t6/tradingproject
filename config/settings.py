@@ -4,18 +4,17 @@ from dotenv import load_dotenv
 # Load environment variables from .env file (override stale shell vars)
 load_dotenv(override=True)
 
-# Upstox API Credentials & Authentication Settings
-UPSTOX_API_KEY = os.getenv("UPSTOX_API_KEY", "")
-UPSTOX_API_SECRET = os.getenv("UPSTOX_API_SECRET", "")
-REDIRECT_URI = os.getenv("UPSTOX_REDIRECT_URI", "http://127.0.0.1:5000/callback")
-OAUTH_PORT = int(os.getenv("OAUTH_PORT", 5000))
+# DhanHQ API Credentials & Configuration
+DHAN_CLIENT_ID = os.getenv("DHAN_CLIENT_ID", "")
+DHAN_ACCESS_TOKEN = os.getenv("DHAN_ACCESS_TOKEN", "")
 
-UPSTOX_AUTH_URL = "https://api.upstox.com/v2/login/authorization/dialog"
-UPSTOX_TOKEN_URL = "https://api.upstox.com/v2/login/authorization/token"
-UPSTOX_API_BASE_URL = "https://api.upstox.com/v2"
+# DhanHQ API Endpoints
+DHAN_API_BASE_URL = "https://api.dhan.co/v2"
+DHAN_RENEW_TOKEN_URL = "https://api.dhan.co/v2/RenewToken"
+UPSTOX_API_BASE_URL = DHAN_API_BASE_URL
 
 # Security & Read-Only Capital Constraints
-INITIAL_WALLET_CAPITAL = 1258.0           # Actual Upstox Live Wallet Available Cash Baseline (INR 1,258.00)
+INITIAL_WALLET_CAPITAL = 1258.0           # Actual Dhan Live Wallet Available Cash Baseline (INR 1,258.00)
 MICRO_CAPITAL_BUDGET_CAP = 250.0          # Micro-Capital Live Test Budget Cap <= INR 250.00 (UNTOUCHED)
 # Note: Standard single-lot premium budget is 100% dynamically sized based on actual available wallet balance.
 
