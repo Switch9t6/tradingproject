@@ -50,6 +50,28 @@ def _safe_print(text: str):
         print(text.encode(sys.stdout.encoding or "utf-8", errors="replace").decode(sys.stdout.encoding or "utf-8", errors="replace"))
 
 
+def _send_or_reply(bot_inst, message, text, **kwargs):
+    """Safely sends or replies to a Telegram message, falling back to send_message if reply_to fails."""
+    try:
+        if message and hasattr(message, "chat") and message.chat:
+            return bot_inst.reply_to(message, text, **kwargs)
+        elif message and hasattr(message, "message_id"):
+            return bot_inst.reply_to(message, text, **kwargs)
+    except Exception:
+        pass
+
+    try:
+        chat_id = getattr(message, "chat", None)
+        if chat_id and hasattr(chat_id, "id"):
+            chat_id = chat_id.id
+        if not chat_id:
+            chat_id = TELEGRAM_CHAT_ID
+        return bot_inst.send_message(chat_id, text, **kwargs)
+    except Exception as ex:
+        _safe_print(f"[Telegram Send Error] {ex}")
+        return None
+
+
 IST_TZ = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 
 def get_ist_now() -> datetime.datetime:
@@ -295,15 +317,16 @@ def _register_handlers(bot):
             "❓ <b>/help</b> - Show this help menu\n"
             "========================================"
         )
-        bot.reply_to(message, help_msg, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
+        _send_or_reply(bot, message, help_msg, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
 
     @bot.message_handler(commands=["start"])
     def cmd_start(message):
         if not check_is_market_open():
-            bot.reply_to(message, "Market is closed. Active trading sessions: Session 1 NSE (09:00 - 15:30 IST) & Session 2 MCX (17:00 - 23:15 IST).", reply_markup=_build_action_keyboard(telebot))
+            _send_or_reply(bot, message, "Market is closed. Active trading sessions: Session 1 NSE (09:00 - 15:30 IST) & Session 2 MCX (17:00 - 23:15 IST).", reply_markup=_build_action_keyboard(telebot))
             return
 
-        bot.reply_to(
+        _send_or_reply(
+            bot,
             message,
             "🚀 [EXECUTING ENGINE] Launching trading pipeline ('python main.py --live')...\n\n"
             "System scanning active dual-session markets & quantitative matrix.",
@@ -497,7 +520,7 @@ def _register_handlers(bot):
             f"Live Trades Today   : {trade_count}\n"
             "========================================"
         )
-        bot.reply_to(message, status_msg, reply_markup=_build_action_keyboard(telebot))
+        _send_or_reply(bot, status_msg, reply_markup=_build_action_keyboard(telebot)) if not isinstance(status_msg, str) else _send_or_reply(bot, message, status_msg, reply_markup=_build_action_keyboard(telebot))
 
     @bot.message_handler(commands=["settoken"])
     def cmd_settoken(message):
@@ -613,15 +636,15 @@ def _get_local_ip() -> str:
                     markup = telebot.types.InlineKeyboardMarkup(row_width=1)
                     btn_web = telebot.types.InlineKeyboardButton("📊 Open Interactive Performance Report", url=primary_url)
                     markup.add(btn_web)
-                    bot.reply_to(message, msg_text, parse_mode="HTML", reply_markup=markup)
+                    _send_or_reply(bot, message, msg_text, parse_mode="HTML", reply_markup=markup)
                 except Exception:
-                    bot.reply_to(message, msg_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
+                    _send_or_reply(bot, message, msg_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
             else:
-                bot.reply_to(message, msg_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
+                _send_or_reply(bot, message, msg_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
 
             _safe_print(f"[Telegram Control] Sent interactive report URL: {primary_url}")
         except Exception as e:
-            bot.reply_to(message, f"❌ Failed to generate report link: {e}")
+            _send_or_reply(bot, message, f"❌ Failed to generate report link: {e}")
 
     @bot.message_handler(commands=["trades"])
     def cmd_trades(message):
@@ -754,39 +777,44 @@ def _get_local_ip() -> str:
                 except Exception:
                     pass
 
-        # 3. Route callback action
-        if call.data.startswith("approve_"):
-            trade_id = call.data.split("approve_")[1]
-            store = _read_approval_store()
-            if trade_id in store:
-                store[trade_id]["status"] = "APPROVED"
-                _write_approval_store(store)
-                _safe_print(f"[Telegram Control] Trade ID {trade_id} APPROVED via Telegram inline button.")
-            if trade_id in _pending_approvals:
-                _pending_approvals[trade_id]["approved"] = True
-                _pending_approvals[trade_id]["event"].set()
-        elif call.data.startswith("reject_"):
-            trade_id = call.data.split("reject_")[1]
-            store = _read_approval_store()
-            if trade_id in store:
-                store[trade_id]["status"] = "REJECTED"
-                _write_approval_store(store)
-                _safe_print(f"[Telegram Control] Trade ID {trade_id} REJECTED via Telegram inline button.")
-            if trade_id in _pending_approvals:
-                _pending_approvals[trade_id]["approved"] = False
-                _pending_approvals[trade_id]["event"].set()
-        elif call.data == "cb_status":
-            cmd_status(call.message)
-        elif call.data == "cb_report":
-            cmd_report(call.message)
-        elif call.data == "cb_trades":
-            cmd_trades(call.message)
-        elif call.data == "cb_squareoff":
-            cmd_squareoff(call.message)
-        elif call.data == "cb_stop":
-            cmd_stop(call.message)
-        elif call.data == "cb_resume":
-            cmd_resume(call.message)
+        # 3. Route callback action safely
+        try:
+            if call.data.startswith("approve_"):
+                trade_id = call.data.split("approve_")[1]
+                store = _read_approval_store()
+                if trade_id in store:
+                    store[trade_id]["status"] = "APPROVED"
+                    _write_approval_store(store)
+                    _safe_print(f"[Telegram Control] Trade ID {trade_id} APPROVED via Telegram inline button.")
+                if trade_id in _pending_approvals:
+                    _pending_approvals[trade_id]["approved"] = True
+                    _pending_approvals[trade_id]["event"].set()
+                _send_or_reply(bot, call.message, f"✅ Trade ID {trade_id} APPROVED.")
+            elif call.data.startswith("reject_"):
+                trade_id = call.data.split("reject_")[1]
+                store = _read_approval_store()
+                if trade_id in store:
+                    store[trade_id]["status"] = "REJECTED"
+                    _write_approval_store(store)
+                    _safe_print(f"[Telegram Control] Trade ID {trade_id} REJECTED via Telegram inline button.")
+                if trade_id in _pending_approvals:
+                    _pending_approvals[trade_id]["approved"] = False
+                    _pending_approvals[trade_id]["event"].set()
+                _send_or_reply(bot, call.message, f"❌ Trade ID {trade_id} REJECTED.")
+            elif call.data == "cb_status":
+                cmd_status(call.message)
+            elif call.data == "cb_report":
+                cmd_report(call.message)
+            elif call.data == "cb_trades":
+                cmd_trades(call.message)
+            elif call.data == "cb_squareoff":
+                cmd_squareoff(call.message)
+            elif call.data == "cb_stop":
+                cmd_stop(call.message)
+            elif call.data == "cb_resume":
+                cmd_resume(call.message)
+        except Exception as err:
+            _safe_print(f"[Telegram Callback Exception] {err}")
 
 
 def is_bot_disabled() -> bool:
