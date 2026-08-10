@@ -88,11 +88,15 @@ def scan_nse_equities_and_indices(
     }
 
     scoped_universe = []
+    if micro_capital:
+        # Prioritize liquid Index Options (NIFTY, MIDCPNIFTY, FINNIFTY) for micro-capital accounts
+        scoped_universe.extend(["NIFTY", "MIDCPNIFTY", "FINNIFTY"])
+
     for sector in top_3_sectors:
         scoped_universe.extend(sector_universe_map.get(sector, []))
 
     if not scoped_universe:
-        scoped_universe = ["BANKBARODA", "INFY", "TATAMOTORS", "SBIN", "TATASTEEL"]
+        scoped_universe = ["NIFTY", "MIDCPNIFTY", "BANKBARODA", "INFY", "TATAMOTORS"]
 
     print(f"[Engine A] Scanned Candidate Universe ({len(scoped_universe)} stocks): {scoped_universe[:8]}...")
 
