@@ -128,6 +128,27 @@ CONSECUTIVE_LOSS_SCALING_PCT = 0.80       # Scale budget down to 80% after a los
 MIN_VOLUME_SPIKE_RATIO = 3.0
 MIN_PRICE_MOMENTUM_PCT = 0.012
 
+# MCX Crude Oil Commodity Options Settings
+MCX_CRUDE_SYMBOL = "CRUDEOIL"
+MCX_CRUDE_INSTRUMENT_KEY = "MCX_FO|CRUDEOIL"
+MCX_CRUDE_LOT_SIZE = 100                      # 1 Lot = 100 Barrels
+MCX_CRUDE_STRIKE_STEP = 50.0                  # Strike interval (50 points)
+MCX_CRUDE_MIN_ATR = 15.0                      # Volatility Gate: ATR(14) > 15 points required
+
+# Dual-Session Scheduling Windows (IST)
+NSE_SESSION_START = "09:00"                   # Session 1: NSE Equities (09:00 AM - 03:30 PM IST)
+NSE_SESSION_END = "15:30"
+MCX_SESSION_START = "17:00"                   # Session 2: MCX Commodities (05:00 PM - 11:15 PM IST)
+MCX_SESSION_END = "23:15"
+MCX_PRIME_WINDOW_START = "17:00"
+MCX_PRIME_WINDOW_END = "23:00"
+MCX_SQUARE_OFF_SCHEDULE_TIME = "23:00"        # 11:00 PM IST MCX Hard EOD Square-Off
+
+# Commodity News & EIA Inventory Blackout Settings
+EIA_BLACKOUT_WINDOW_MINUTES = 15              # Block trading 15 mins before & after 08:00 PM IST Wednesdays
+EIA_INVENTORY_DAY_OF_WEEK = 2                 # 2 = Wednesday (0 = Monday)
+EIA_RELEASE_TIME_IST = "20:00"                # 08:00 PM IST US EIA Weekly Inventory Report
+
 # Daily Workflow Schedule (IST)
 OAUTH_SCHEDULE_TIME = "09:00"
 SCAN_EXEC_SCHEDULE_TIME = "09:30"

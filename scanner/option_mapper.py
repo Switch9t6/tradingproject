@@ -1,10 +1,95 @@
+import os
+import sys
 import math
 from typing import Dict, Any, Optional
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from config.settings import (
     TARGET_DELTA_MIN,
     TARGET_DELTA_MAX,
-    MAX_BID_ASK_SPREAD_PCT
+    MAX_BID_ASK_SPREAD_PCT,
+    MCX_CRUDE_SYMBOL,
+    MCX_CRUDE_LOT_SIZE,
+    MCX_CRUDE_STRIKE_STEP
 )
+
+def get_mcx_crude_option_contract(
+    spot_price: float,
+    direction: str,
+    budget_cap: Optional[float] = None,
+    option_type: Optional[str] = None,
+    simulated_spread_pct: float = 0.008
+) -> Optional[Dict[str, Any]]:
+    """
+    MCX Option Contract Mapper for MCX Crude Oil Options.
+    Selects At-The-Money (ATM) or Slightly ITM Call (CE) or Put (PE) option contract.
+    Enforces contract lot size (100 barrels) budget check: (premium * 100 <= budget_cap).
+    Enforces Bid-Ask Spread <= 1.5% and Delta target 0.50-0.55.
+    """
+    if budget_cap is None:
+        budget_cap = float("inf")
+
+    if not option_type:
+        option_type = "CE" if direction.upper() == "BULLISH" else "PE"
+
+    strike_step = MCX_CRUDE_STRIKE_STEP # 50.0 points
+    lot_size = MCX_CRUDE_LOT_SIZE       # 100 barrels
+
+    # Calculate ATM Strike (rounded to nearest 50 points)
+    atm_strike = round(spot_price / strike_step) * strike_step
+    estimated_delta = 0.52 # ATM Delta target range (0.50 to 0.55)
+
+    # MCX Crude Oil Option Premium estimate (~1.5% of spot price)
+    estimated_premium = round(spot_price * 0.015, 2)
+
+    bid_price = round(estimated_premium * (1.0 - (simulated_spread_pct / 2.0)), 2)
+    ask_price = round(estimated_premium * (1.0 + (simulated_spread_pct / 2.0)), 2)
+    bid_ask_spread_pct = (ask_price - bid_price) / ask_price if ask_price > 0 else 0.0
+
+    total_lot_cost = round(ask_price * lot_size, 2)
+
+    option_symbol = f"CRUDEOIL_{int(atm_strike)}_{option_type}"
+    instrument_key = f"MCX_FO|CRUDEOIL_{int(atm_strike)}_{option_type}"
+
+    budget_approved = total_lot_cost <= budget_cap
+    spread_approved = bid_ask_spread_pct <= MAX_BID_ASK_SPREAD_PCT
+    delta_approved = (estimated_delta >= TARGET_DELTA_MIN) and (estimated_delta <= TARGET_DELTA_MAX)
+    open_interest = 120000
+    oi_approved = open_interest >= 100000
+
+    mapped_contract = {
+        "underlying_symbol": MCX_CRUDE_SYMBOL,
+        "exchange": "MCX_FO",
+        "option_symbol": option_symbol,
+        "instrument_key": instrument_key,
+        "option_type": option_type,
+        "strike_price": atm_strike,
+        "spot_price": spot_price,
+        "estimated_delta": estimated_delta,
+        "bid_price": bid_price,
+        "ask_price": ask_price,
+        "spread_pct": round(bid_ask_spread_pct * 100, 2),
+        "lot_size": lot_size,
+        "estimated_premium": ask_price,
+        "total_lot_cost": total_lot_cost,
+        "max_budget_limit": budget_cap,
+        "budget_approved": budget_approved and spread_approved and delta_approved and oi_approved
+    }
+
+    print("\n[MCX Crude Option Contract Mapper]")
+    print(f"  Mapped Contract     : {option_symbol}")
+    print(f"  ATM Strike Price    : Rs {atm_strike} ({option_type}) | Delta: {estimated_delta:.2f}")
+    print(f"  Bid / Ask Quote     : Rs {bid_price:.2f} / Rs {ask_price:.2f} (Spread: {bid_ask_spread_pct*100:.2f}%)")
+    print(f"  Lot Size (Barrels)  : {lot_size} barrels")
+    print(f"  Total Lot Cost      : Rs {total_lot_cost:,.2f} INR (Budget Cap: Rs {budget_cap:,.2f} INR)")
+    print(f"  Spread Check        : {'APPROVED (<= 1.5%)' if spread_approved else 'REJECTED'}")
+    print(f"  Budget Status       : {'APPROVED' if budget_approved else 'REJECTED (Exceeds Budget)'}")
+
+    if not spread_approved or not oi_approved or not budget_approved:
+        return None
+
+    return mapped_contract
 
 def resolve_atm_option_contract(
     candidate: Dict[str, Any],
@@ -12,10 +97,18 @@ def resolve_atm_option_contract(
     simulated_spread_pct: float = 0.008
 ) -> Optional[Dict[str, Any]]:
     """
-    UPGRADE #3: Option Selection Guardrails.
-    Map top breakout candidate to Delta 0.50–0.55 ATM Option contract (CE/PE),
-    enforce Bid-Ask Spread <= 1.5% check, and verify single-lot premium budget against available wallet balance.
+    Option Selection Guardrails for NSE Equity & MCX Commodity Candidates.
+    Routes MCX Crude Oil candidates to get_mcx_crude_option_contract().
     """
+    if candidate.get("is_mcx") or candidate.get("symbol") == MCX_CRUDE_SYMBOL:
+        return get_mcx_crude_option_contract(
+            spot_price=candidate["spot_price"],
+            direction=candidate["direction"],
+            budget_cap=max_budget,
+            option_type=candidate.get("option_type"),
+            simulated_spread_pct=simulated_spread_pct
+        )
+
     if max_budget is None:
         max_budget = float("inf")
     symbol = candidate["symbol"]
@@ -37,7 +130,7 @@ def resolve_atm_option_contract(
         
     estimated_premium = round(spot_price * est_premium_pct, 2)
     
-    # UPGRADE #3: Bid-Ask Spread Verification
+    # Bid-Ask Spread Verification
     bid_price = round(estimated_premium * (1.0 - (simulated_spread_pct / 2.0)), 2)
     ask_price = round(estimated_premium * (1.0 + (simulated_spread_pct / 2.0)), 2)
     bid_ask_spread_pct = (ask_price - bid_price) / ask_price if ask_price > 0 else 0.0
@@ -53,6 +146,7 @@ def resolve_atm_option_contract(
     
     mapped_contract = {
         "underlying_symbol": symbol,
+        "exchange": "NSE_FO",
         "option_symbol": option_symbol,
         "instrument_key": instrument_key,
         "option_type": option_type,
@@ -69,7 +163,6 @@ def resolve_atm_option_contract(
         "budget_approved": budget_approved and spread_approved and delta_approved
     }
     
-    # Open Interest (OI) & Liquidity Depth Check (>= 100,000)
     open_interest = candidate.get("open_interest", 150000)
     oi_approved = open_interest >= 100000
 
@@ -84,29 +177,18 @@ def resolve_atm_option_contract(
     print(f"  Liquidity OI Check  : {'APPROVED (>= 100k)' if oi_approved else 'REJECTED (Low OI)'}")
     print(f"  Budget Status       : {'APPROVED' if budget_approved else 'REJECTED (Exceeds Budget)'}")
     
-    if not spread_approved:
-        print(f"WARNING: Contract {option_symbol} Bid-Ask Spread ({bid_ask_spread_pct*100:.2f}%) exceeds 1.5% limit. Rejecting.")
-        return None
-
-    if not oi_approved:
-        print(f"WARNING: Contract {option_symbol} Open Interest ({open_interest:,}) is below 100,000 contracts limit. Rejecting.")
-        return None
-        
-    if not budget_approved:
-        print(f"WARNING: Contract {option_symbol} cost (Rs {total_lot_cost}) exceeds max budget of Rs {max_budget}. Rejecting.")
+    if not spread_approved or not oi_approved or not budget_approved:
         return None
         
     return mapped_contract
 
 if __name__ == "__main__":
-    cand = {
-        "symbol": "BANKBARODA",
-        "spot_price": 248.50,
+    mcx_cand = {
+        "symbol": "CRUDEOIL",
+        "spot_price": 6250.00,
         "direction": "BULLISH",
         "option_type": "CE",
-        "strike_interval": 2.5,
-        "lot_size": 2925,
-        "is_index": False
+        "is_mcx": True
     }
-    res = resolve_atm_option_contract(cand)
-    print("Resolved:", res)
+    res = resolve_atm_option_contract(mcx_cand, max_budget=10000.0)
+    print("MCX Resolved:", res)

@@ -53,12 +53,14 @@ def get_ist_now() -> datetime.datetime:
     return datetime.datetime.now(IST_TZ)
 
 def check_is_market_open() -> bool:
-    """Validates whether current time is within official NSE trading window (Mon-Fri 09:15 AM - 03:15 PM IST)."""
+    """Validates whether current time is within official NSE or MCX trading windows (Mon-Fri)."""
     now = get_ist_now()
     if now.weekday() >= 5: # 5 = Saturday, 6 = Sunday
         return False
     current_time = now.time()
-    return datetime.time(9, 15) <= current_time <= datetime.time(15, 15)
+    nse_open = (datetime.time(9, 15) <= current_time <= datetime.time(15, 30))
+    mcx_open = (datetime.time(17, 0) <= current_time <= datetime.time(23, 15))
+    return nse_open or mcx_open
 
 
 def _build_action_keyboard(telebot_module):
@@ -196,6 +198,35 @@ def start_telegram_listener_background():
     if bot is None:
         return
 
+    def _polling_loop():
+        _safe_print("[Telegram Control] Cloud polling listener started. Listening 24/7 for /start, /status, /report, /reports, /trades, /stop, /resume...")
+        import time
+        try:
+            bot.remove_webhook()
+            bot.delete_webhook(drop_pending_updates=True)
+        except Exception:
+            pass
+
+        consecutive_409 = 0
+        while True:
+            try:
+                bot.infinity_polling(timeout=30, long_polling_timeout=20, skip_pending=True)
+                consecutive_409 = 0
+            except Exception as e:
+                err_str = str(e)
+                if "409" in err_str or "Conflict" in err_str:
+                    consecutive_409 += 1
+                    if consecutive_409 == 1:
+                        _safe_print("[Telegram Control] 409 Conflict (previous process shutting down). Auto-retrying in background...")
+                    time.sleep(10)
+                else:
+                    _safe_print(f"[Telegram Control] Polling Error: {e}")
+                    time.sleep(30)
+
+    t = threading.Thread(target=_polling_loop, daemon=True)
+    t.start()
+    _listener_started = True
+
 
 def _register_handlers(bot):
     """Register all Telegram command handlers and inline button callbacks on the bot instance."""
@@ -204,13 +235,13 @@ def _register_handlers(bot):
     @bot.message_handler(commands=["start"])
     def cmd_start(message):
         if not check_is_market_open():
-            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM", reply_markup=_build_action_keyboard(telebot))
+            bot.reply_to(message, "Market is closed. Active trading sessions: Session 1 NSE (09:00 - 15:30 IST) & Session 2 MCX (17:00 - 23:15 IST).", reply_markup=_build_action_keyboard(telebot))
             return
 
         bot.reply_to(
             message,
             "🚀 [EXECUTING ENGINE] Launching trading pipeline ('python main.py --live')...\n\n"
-            "System scanning top-ranked sectors & quantitative multi-factor matrix.",
+            "System scanning active dual-session markets & quantitative matrix.",
             reply_markup=_build_action_keyboard(telebot)
         )
 
@@ -220,9 +251,11 @@ def _register_handlers(bot):
                 _safe_print(f"[Telegram Control] Executing command via /start: {' '.join(cmd)}")
                 env = os.environ.copy()
                 env["TELEGRAM_LISTENER_DISABLED"] = "1"
-                subprocess.run(cmd, env=env, check=True)
-            except Exception as e:
-                _safe_print(f"[Telegram Control Error] Execution failed: {e}")
+                proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                out, _ = proc.communicate(timeout=180)
+                _safe_print(f"[Telegram Control Output]\n{out[-500:] if out else 'No output'}")
+            except Exception as ex:
+                _safe_print(f"[Telegram Control Run Error] {ex}")
 
         # Run pipeline in a background thread so Telegram listener stays non-blocking
         t = threading.Thread(target=_run_pipeline_job, daemon=True)
@@ -252,28 +285,24 @@ def _register_handlers(bot):
 
     @bot.message_handler(commands=["stop"])
     def cmd_stop(message):
-        if not check_is_market_open():
-            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM", reply_markup=_build_action_keyboard(telebot))
-            return
-
         try:
             with open(BOT_DISABLED_FLAG, "w") as f:
-                f.write("DISABLED_BY_TELEGRAM")
+                f.write(f"PAUSED_AT={datetime.datetime.now().isoformat()}")
             bot.reply_to(
                 message,
-                "[EMERGENCY STOP ACTIVATED]\n"
-                "Trading engine PAUSED. No new trades will be placed.\n"
-                "Send /resume to re-enable.",
+                "🛑 [TRADING ENGINE PAUSED]\n"
+                "Remote kill switch activated. All automated order placements HALTED.\n"
+                "Send /resume to re-enable trading.",
                 reply_markup=_build_action_keyboard(telebot)
             )
-            _safe_print("[Telegram Control] EMERGENCY STOP activated via Telegram /stop command.")
+            _safe_print("[Telegram Control] Trading engine PAUSED via Telegram /stop command.")
         except Exception as e:
             bot.reply_to(message, f"[ERROR] Failed to activate kill switch: {e}")
 
     @bot.message_handler(commands=["resume"])
     def cmd_resume(message):
         if not check_is_market_open():
-            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM", reply_markup=_build_action_keyboard(telebot))
+            bot.reply_to(message, "Market is closed. Active trading sessions: Session 1 NSE (09:00 - 15:30 IST) & Session 2 MCX (17:00 - 23:15 IST).", reply_markup=_build_action_keyboard(telebot))
             return
 
         try:
@@ -291,12 +320,21 @@ def _register_handlers(bot):
 
     @bot.message_handler(commands=["status"])
     def cmd_status(message):
-        # /status works ANYTIME (both when market is open and closed)
         now = get_ist_now()
-        market_open = check_is_market_open()
-        market_state = "OPEN (Trading Window Active)" if market_open else "CLOSED (Mon-Fri 09:15 AM - 03:15 PM IST)"
+        current_time = now.time()
+
+        nse_active = (now.weekday() < 5) and (datetime.time(9, 15) <= current_time <= datetime.time(15, 30))
+        mcx_active = (now.weekday() < 5) and (datetime.time(17, 0) <= current_time <= datetime.time(23, 15))
+
+        if nse_active:
+            active_session_str = "Session 1 Active (NSE Equities)"
+        elif mcx_active:
+            active_session_str = "Session 2 Active (MCX Commodities)"
+        else:
+            active_session_str = "STANDBY (Between Sessions / Closed)"
+
         is_paused = os.path.exists(BOT_DISABLED_FLAG)
-        engine_state = "PAUSED (Kill Switch Active)" if is_paused else ("ONLINE & SCANNING" if market_open else "STANDBY (Market Closed)")
+        engine_state = "PAUSED (Kill Switch Active)" if is_paused else ("ONLINE & SCANNING" if (nse_active or mcx_active) else "STANDBY")
 
         # Attempt to fetch live wallet balance
         wallet_str = "Rs 1,258.00 INR"
@@ -323,9 +361,11 @@ def _register_handlers(bot):
             pass
 
         status_msg = (
-            "[SYSTEM STATUS REPORT]\n"
+            "[DUAL-SESSION SYSTEM STATUS]\n"
             "========================================\n"
-            f"Market Window       : {market_state}\n"
+            f"Active Session      : {active_session_str}\n"
+            f"Session 1 (NSE)     : {'ONLINE' if nse_active else 'CLOSED (09:00 - 15:30 IST)'}\n"
+            f"Session 2 (MCX)     : {'ONLINE' if mcx_active else 'CLOSED (17:00 - 23:15 IST)'}\n"
             f"Live Wallet Balance : {wallet_str}\n"
             f"Engine State        : {engine_state}\n"
             f"Live Trades Today   : {trade_count}\n"
