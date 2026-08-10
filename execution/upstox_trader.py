@@ -266,7 +266,8 @@ class UpstoxOptionsTrader:
                         print(f"  [Cancel Order Error] Could not cancel order {order_id}: {cancel_err}")
                     return None
             except Exception as e:
-                print(f"[LIVE ORDER ERROR] Failed to place order: {e}")
+                print(f"[LIVE ORDER ERROR] Failed to place order: {e}. Trade execution aborted safely.")
+                return None
 
         mode_label = "DRY_RUN" if self.dry_run else "LIVE"
         trade_id = self.state_mgr.record_entry_trade(

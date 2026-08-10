@@ -326,11 +326,26 @@ def _register_handlers(bot):
                 os.remove(BOT_DISABLED_FLAG)
             bot.reply_to(
                 message,
-                "[TRADING ENGINE RESUMED]\n"
-                "Dynamic scanning re-enabled. New trades will execute normally.",
+                "▶️ [TRADING ENGINE RESUMED]\n"
+                "Dynamic scanning re-enabled. Triggering active session market scan...",
                 reply_markup=_build_action_keyboard(telebot)
             )
             _safe_print("[Telegram Control] Trading engine RESUMED via Telegram /resume command.")
+
+            def _run_resume_job():
+                try:
+                    cmd = [sys.executable, "main.py", "--live"]
+                    _safe_print(f"[Telegram Control] Executing pipeline scan via /resume: {' '.join(cmd)}")
+                    env = os.environ.copy()
+                    env["TELEGRAM_LISTENER_DISABLED"] = "1"
+                    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    out, _ = proc.communicate(timeout=180)
+                    _safe_print(f"[Telegram Control Output]\n{out[-500:] if out else 'No output'}")
+                except Exception as ex:
+                    _safe_print(f"[Telegram Control Run Error] {ex}")
+
+            t = threading.Thread(target=_run_resume_job, daemon=True)
+            t.start()
         except Exception as e:
             bot.reply_to(message, f"[ERROR] Failed to resume: {e}")
 
