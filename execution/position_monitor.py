@@ -155,11 +155,12 @@ class AsyncDhanWebSocketMonitor:
                     try:
                         from dhanhq import dhanhq, DhanContext
                         dhan = dhanhq(DhanContext(client_id, self.access_token))
-                        # Query LTP via Dhan API
-                        q = dhan.get_market_quote_ltp(security_id=self.security_id)
+                        exch = "MCX_COMM" if "MCX" in str(self.instrument_key) else "NSE_FNO"
+                        q = dhan.quote_data(securities={exch: [int(self.security_id)]})
                         data = q.get("data", q) if isinstance(q, dict) else q
                         if isinstance(data, dict):
-                            current_ltp = float(data.get("last_price") or data.get("ltp") or self.monitor.highest_price_seen)
+                            item = data.get(exch, {}).get(str(self.security_id), {})
+                            current_ltp = float(item.get("last_price") or item.get("ltp") or self.monitor.highest_price_seen)
                     except Exception as poll_err:
                         print(f"  [Dhan LTP Feed Query Notice] {poll_err}")
                     
