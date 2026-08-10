@@ -14,39 +14,12 @@ DEFAULT_BLACKOUT_BUFFER_MINUTES = 30
 
 def fetch_today_economic_events() -> List[Dict[str, Any]]:
     """
-    Fetches daily economic calendar events for India and major global market drivers.
-    Includes an online API fetch with fallback parsing.
+    Fetches daily economic calendar events for India using static schedule audit
+    for major RBI MPC, CPI, GDP, and Union Budget announcements.
     Returns a list of event dictionaries:
     [{"title": "RBI Interest Rate Decision", "impact": "HIGH", "event_time": datetime.time(10, 0), "country": "IN"}]
     """
-    today_str = datetime.date.today().isoformat()
     events: List[Dict[str, Any]] = []
-
-    try:
-        # Fetching macro calendar events via public API endpoint (2.0s timeout limit)
-        url = f"https://nifty-api.com/v1/economic-calendar?date={today_str}"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AntigravityQuant/2.0"}
-        
-        response = requests.get(url, headers=headers, timeout=2.0)
-        if response.status_code == 200:
-            data = response.json()
-            raw_events = data.get("events", [])
-            for item in raw_events:
-                title = str(item.get("title", "")).upper()
-                is_high = any(kw in title for kw in HIGH_IMPACT_KEYWORDS) or item.get("impact", "").upper() == "HIGH"
-                if is_high:
-                    t_str = item.get("time", "10:00")
-                    hour, minute = map(int, t_str.split(":")[:2])
-                    events.append({
-                        "title": item.get("title", "Macro Event"),
-                        "impact": "HIGH",
-                        "event_time": datetime.time(hour, minute),
-                        "country": item.get("country", "IN")
-                    })
-            return events
-    except Exception as e:
-        # Soft warning logged for API downtime fallback
-        print(f"[News Filter Warning] External economic calendar API unavailable ({e}). Using static schedule audit.")
 
     # Local Macro Calendar Schedule (Static High-Impact Key Dates / MPC Windows)
     # Known major recurring announcements: e.g. RBI MPC Announcement ~ 10:00 AM IST
