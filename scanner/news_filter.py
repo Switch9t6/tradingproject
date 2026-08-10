@@ -83,7 +83,8 @@ def is_news_blackout_active(buffer_minutes: int = DEFAULT_BLACKOUT_BUFFER_MINUTE
         False: Safe to trade (No high-impact news in window).
     """
     if now_dt is None:
-        now_dt = datetime.datetime.now()
+        ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+        now_dt = datetime.datetime.now(ist_tz)
         
     current_time = now_dt.time()
     today_events = fetch_today_economic_events()

@@ -44,7 +44,8 @@ def check_market_hours_and_calendar() -> bool:
     Validates whether today is an official NSE trading day (Mon-Fri)
     and current time is within market operating window (09:15 AM to 03:30 PM IST).
     """
-    now = datetime.datetime.now()
+    ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    now = datetime.datetime.now(ist_tz)
     is_weekday = now.weekday() < 5 # 0 = Mon, 4 = Fri, 5 = Sat, 6 = Sun
     
     time_0915 = datetime.time(9, 15)

@@ -46,9 +46,15 @@ def _safe_print(text: str):
         print(text.encode(sys.stdout.encoding or "utf-8", errors="replace").decode(sys.stdout.encoding or "utf-8", errors="replace"))
 
 
+IST_TZ = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+
+def get_ist_now() -> datetime.datetime:
+    """Returns current datetime in IST (India Standard Time: UTC+5:30)."""
+    return datetime.datetime.now(IST_TZ)
+
 def check_is_market_open() -> bool:
     """Validates whether current time is within official NSE trading window (Mon-Fri 09:15 AM - 03:15 PM IST)."""
-    now = datetime.datetime.now()
+    now = get_ist_now()
     if now.weekday() >= 5: # 5 = Saturday, 6 = Sunday
         return False
     current_time = now.time()
@@ -258,7 +264,7 @@ def _register_handlers(bot):
     @bot.message_handler(commands=["status"])
     def cmd_status(message):
         # /status works ANYTIME (both when market is open and closed)
-        now = datetime.datetime.now()
+        now = get_ist_now()
         market_open = check_is_market_open()
         market_state = "OPEN (Trading Window Active)" if market_open else "CLOSED (Mon-Fri 09:15 AM - 03:15 PM IST)"
         is_paused = os.path.exists(BOT_DISABLED_FLAG)

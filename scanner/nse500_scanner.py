@@ -39,7 +39,8 @@ def is_prime_momentum_window(current_time: datetime.time = None) -> bool:
     Rejects trades during sideways 11:15 AM - 01:30 PM lunch hour chop.
     """
     if not current_time:
-        current_time = datetime.datetime.now().time()
+        ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+        current_time = datetime.datetime.now(ist_tz).time()
         
     w1_start = datetime.time(9, 30)
     w1_end = datetime.time(11, 15)
