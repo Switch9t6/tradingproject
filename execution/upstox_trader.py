@@ -242,7 +242,8 @@ class UpstoxOptionsTrader:
                             ord_status = str(data.get("status", "") if isinstance(data, dict) else getattr(data, "status", "")).lower()
                             if ord_status in ["complete", "filled"]:
                                 filled = True
-                                print(f"  [ORDER FILLED] Order {order_id} filled within {sec}s (Status: {ord_status}).")
+                                entry_premium = self.reconcile_exact_order_fill_price(order_id, fallback_price=entry_premium)
+                                print(f"  [ORDER FILLED] Order {order_id} filled within {sec}s at exact price Rs {entry_premium:.2f}.")
                                 break
                         except Exception as err:
                             print(f"[Fill Verification Sec {sec}] Status check: {err}")
@@ -446,16 +447,8 @@ class UpstoxOptionsTrader:
 
                 print(f"  [LIVE SELL ORDER DISPATCHED] Order ID: {order_id} | Response: {api_resp}")
 
-                time.sleep(2.0)
                 if order_id:
-                    try:
-                        ord_detail = self.order_api.get_order_details(order_id=order_id, api_version="2.0")
-                        d = ord_detail.data if hasattr(ord_detail, "data") else ord_detail
-                        avg_p = float(d.get("average_price", exit_premium) if isinstance(d, dict) else getattr(d, "average_price", exit_premium))
-                        if avg_p > 0:
-                            exit_premium = avg_p
-                    except Exception:
-                        pass
+                    exit_premium = self.reconcile_exact_order_fill_price(order_id, fallback_price=exit_premium)
             except Exception as e:
                 print(f"[LIVE SELL ORDER ERROR] {e}")
 
@@ -496,3 +489,52 @@ class UpstoxOptionsTrader:
             "net_pnl": net_pnl,
             "exit_reason": exit_reason
         }
+
+    def reconcile_exact_order_fill_price(self, order_id: str, fallback_price: float, max_attempts: int = 5) -> float:
+        """
+        Reconciles exact fill price from Upstox Trade Book (get_trades_by_order & get_order_details).
+        Computes volume-weighted average fill price (VWAP) across all executed partial fills.
+        Falls back to fallback_price (LTP estimate) if trade book has not yet populated.
+        """
+        if self.dry_run or not order_id:
+            return fallback_price
+
+        print(f"  [Trade Book Reconciliation] Polling exact fill price for Order ID: {order_id}...")
+        for attempt in range(1, max_attempts + 1):
+            time.sleep(1.0)
+            
+            # Attempt 1: Query exact trade fills for order ID via get_trades_by_order
+            try:
+                t_resp = self.order_api.get_trades_by_order(order_id=order_id, api_version="2.0")
+                t_data = t_resp.data if hasattr(t_resp, "data") else t_resp
+                trades_list = t_data if isinstance(t_data, list) else []
+                if trades_list:
+                    tot_qty = 0
+                    tot_val = 0.0
+                    for tr in trades_list:
+                        q = int(tr.get("quantity", 0) if isinstance(tr, dict) else getattr(tr, "quantity", 0))
+                        p = float(tr.get("average_price", 0.0) if isinstance(tr, dict) else getattr(tr, "average_price", 0.0))
+                        if q > 0 and p > 0:
+                            tot_qty += q
+                            tot_val += (q * p)
+                    if tot_qty > 0:
+                        vwap_fill = round(tot_val / tot_qty, 2)
+                        print(f"  ✅ [EXACT TRADE BOOK FILL CONFIRMED] Order {order_id} fill VWAP: Rs {vwap_fill:.2f} (Filled Qty: {tot_qty})")
+                        return vwap_fill
+            except Exception:
+                pass
+
+            # Attempt 2: Fallback query via get_order_details
+            try:
+                ord_detail = self.order_api.get_order_details(order_id=order_id, api_version="2.0")
+                d = ord_detail.data if hasattr(ord_detail, "data") else ord_detail
+                avg_p = float(d.get("average_price", 0.0) if isinstance(d, dict) else getattr(d, "average_price", 0.0))
+                status = str(d.get("status", "") if isinstance(d, dict) else getattr(d, "status", "")).lower()
+                if avg_p > 0 and status in ["complete", "filled"]:
+                    print(f"  ✅ [ORDER DETAILS FILL CONFIRMED] Order {order_id} avg price: Rs {avg_p:.2f} (Status: {status})")
+                    return round(avg_p, 2)
+            except Exception:
+                pass
+
+        print(f"  ⚠️ [Trade Book Reconcile Warning] Could not fetch exact trade book fill after {max_attempts}s. Using fallback estimate: Rs {fallback_price:.2f}")
+        return fallback_price
