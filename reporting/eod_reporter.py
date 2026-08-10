@@ -493,7 +493,23 @@ def fetch_upstox_live_trades_fallback(access_token: str) -> list:
             gross_pnl = round((exit_p - entry_p) * qty, 2)
             friction = round(20.0 + (gross_pnl * 0.001 if gross_pnl > 0 else 0.0), 2)
             net_pnl = round(gross_pnl - friction, 2)
-            reason = "TARGET_HIT_+25%" if exit_p > entry_p else ("STOP_LOSS_HIT" if exit_p < entry_p else "ACTIVE_HOLD")
+
+            # Detect Manual Exit vs Automated System Exit
+            s_tag = getattr(s, "tag", None) if s and not isinstance(s, dict) else (s.get("tag") if s else None)
+            if s:
+                if not s_tag or s_tag != "OPTIONS_BOT":
+                    reason = "MANUAL"
+                else:
+                    target_p = round(entry_p * 1.25, 2)
+                    stop_p = round(entry_p * 0.88, 2)
+                    if exit_p >= target_p:
+                        reason = "TARGET_HIT_+25%"
+                    elif exit_p <= stop_p:
+                        reason = "STOP_LOSS_HIT"
+                    else:
+                        reason = "MANUAL"
+            else:
+                reason = "ACTIVE_HOLD"
 
             trades.append({
                 "id": i,
