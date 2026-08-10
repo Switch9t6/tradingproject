@@ -559,16 +559,34 @@ def _register_handlers(bot):
                     f"<b>Net Realized PnL:</b> <code>{pnl_str} INR</code>\n"
                     f"<b>Max Drawdown    :</b> {data['max_drawdown_pct']}%\n"
                     "========================================\n"
-                    "Tap below to open the interactive performance web dashboard or download custom date range PDFs:"
                 )
             except Exception:
-                msg_text = "📊 <b>[QUANT PERFORMANCE REPORT DASHBOARD]</b>\nTap below to open the interactive performance web dashboard:"
+                msg_text = "📊 <b>[QUANT PERFORMANCE REPORT DASHBOARD]</b>\n========================================\n"
 
-            markup = telebot.types.InlineKeyboardMarkup(row_width=1)
-            btn_web = telebot.types.InlineKeyboardButton("📊 Open Interactive Performance Report", url=web_app_url)
-            markup.add(btn_web)
+            is_local = ("localhost" in base_url or "127.0.0.1" in base_url or not base_url.startswith("https://"))
 
-            bot.reply_to(message, msg_text, parse_mode="HTML", reply_markup=markup)
+            if is_local:
+                msg_text += (
+                    "🌐 <b>Interactive Web Dashboard URL:</b>\n"
+                    f'<a href="{web_app_url}">{web_app_url}</a>\n\n'
+                    "<i>Open the link above in your browser to view the interactive dashboard & download PDFs.</i>"
+                )
+                bot.reply_to(message, msg_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
+            else:
+                try:
+                    full_text = msg_text + "Tap below to open the interactive performance web dashboard or download custom date range PDFs:"
+                    markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+                    btn_web = telebot.types.InlineKeyboardButton("📊 Open Interactive Performance Report", url=web_app_url)
+                    markup.add(btn_web)
+                    bot.reply_to(message, full_text, parse_mode="HTML", reply_markup=markup)
+                except Exception as btn_err:
+                    # Fallback if Telegram API rejects inline button URL
+                    full_text = msg_text + (
+                        "\n🌐 <b>Report URL:</b>\n"
+                        f'<a href="{web_app_url}">{web_app_url}</a>'
+                    )
+                    bot.reply_to(message, full_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
+
             _safe_print(f"[Telegram Control] Sent interactive report URL: {web_app_url}")
         except Exception as e:
             bot.reply_to(message, f"❌ Failed to generate report link: {e}")
