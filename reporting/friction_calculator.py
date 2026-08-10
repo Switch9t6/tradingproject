@@ -1,5 +1,5 @@
 """
-Unified Friction & Net PnL Calculator for Upstox Options Trading
+Unified Friction & Net PnL Calculator for DhanHQ Options Trading
 Calculates accurate roundtrip transaction fees (Brokerage, STT, Exchange Fees, GST, Stamp Duty, SEBI)
 based on official NSE FnO tax rates.
 """

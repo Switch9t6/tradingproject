@@ -402,7 +402,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="header">
             <div class="header-title">
                 <h1>INTRADAY OPTIONS TRADING DASHBOARD</h1>
-                <div class="header-subtitle">Upstox API v2 Autonomous Options Execution Engine</div>
+                <div class="header-subtitle">DhanHQ API v2 Autonomous Options Execution Engine</div>
             </div>
             <div class="badges">
                 <span class="badge {{ 'badge-mode-dryrun' if is_dry_run else 'badge-mode-live' }}">

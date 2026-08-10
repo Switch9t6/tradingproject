@@ -410,12 +410,12 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         <!-- Header Banner -->
         <div class="header">
             <div class="header-title">
-                <h1>REAL-TIME UPSTOX LIVE MARKET DASHBOARD</h1>
+                <h1>REAL-TIME DHANHQ LIVE MARKET DASHBOARD</h1>
                 <div class="header-subtitle">100% Real Live Trading Audit (Zero Dry-Run / Zero Mock Data)</div>
             </div>
             <div class="badges">
                 <span class="badge badge-live">🚀 LIVE PRODUCTION TRADES ONLY</span>
-                <span class="badge badge-security">🔒 UPSTOX API SYNCED</span>
+                <span class="badge badge-security">🔒 DHAN API SYNCED</span>
                 <span class="badge badge-date">📅 {{ date }}</span>
             </div>
         </div>
@@ -423,7 +423,7 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         <!-- Metrics Grid -->
         <div class="metrics-grid">
             <div class="metric-card">
-                <div class="metric-label">Actual Upstox Available Cash</div>
+                <div class="metric-label">DhanHQ Live Available Cash</div>
                 <div class="metric-value" style="color: var(--accent-green);">Rs {{ live_balance }}</div>
                 <div class="metric-subtext">Used Margin: Rs {{ used_margin }}</div>
             </div>
@@ -514,7 +514,7 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
 
         <div class="footer">
-            <p>Upstox API v2 Live Real-Time Production Reporter | 0% Dry-Run Contamination Verified</p>
+            <p>DhanHQ API v2 Live Real-Time Production Reporter | 0% Dry-Run Contamination Verified</p>
         </div>
     </div>
 </body>
@@ -522,7 +522,7 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 """
 
 def extract_equity_margin(res) -> tuple[float, float]:
-    """Helper to safely extract available_margin and used_margin from Upstox API response dict or object."""
+    """Helper to safely extract available_margin and used_margin from DhanHQ API response dict or object."""
     try:
         data = getattr(res, "data", res)
         eq = data.get("equity", {}) if isinstance(data, dict) else getattr(data, "equity", {})

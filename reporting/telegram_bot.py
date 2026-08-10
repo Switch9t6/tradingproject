@@ -69,7 +69,7 @@ def send_trade_entry_alert(trade_data: Dict[str, Any], wallet_balance: float = 0
         f"⚡ <b>[EXECUTED TRADE NOTIFICATION - {mode}]</b>\n"
         f"========================================\n"
         f"<b>Contract Symbol :</b> <code>{option_symbol}</code>\n"
-        f"<b>Execution Mode  :</b> REAL LIVE UPSTOX ORDER\n"
+        f"<b>Execution Mode  :</b> REAL LIVE DHAN ORDER\n"
         f"<b>Order Quantity  :</b> {lot_size} shares (1 Lot)\n"
         f"<b>Fill Premium    :</b> Rs {entry_p:.2f} / share\n"
         f"<b>Total Cost      :</b> Rs {total_value:,.2f} INR\n"

@@ -180,7 +180,7 @@ def request_telegram_trade_approval(
     try:
         if is_approved:
             bot.edit_message_text(
-                f"✅ [ORDER APPROVED] {option_symbol} (Rs {total_cost:,.2f}) authorized by user. Order executing on Upstox...",
+                f"✅ [ORDER APPROVED] {option_symbol} (Rs {total_cost:,.2f}) authorized by user. Order executing on DhanHQ...",
                 TELEGRAM_CHAT_ID,
                 sent_msg.message_id
             )
@@ -315,7 +315,7 @@ def _register_handlers(bot):
                 if out and ("LIVE LIMIT ORDER PLACED" in out or "CLOSED" in out or "EXECUTED" in out or "TARGET HIT" in out):
                     bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[PIPELINE EXECUTED SUCCESSFULLY]</b>\n\n<pre>{out[-600:]}</pre>", parse_mode="HTML")
                 elif out and "UDAPI1154" in out:
-                    bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[UPSTOX IP RESTRICTION]</b>\nUpstox blocked local origin IP (UDAPI1154). Order execution must run on Railway cloud.", parse_mode="HTML")
+                    bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[DHAN API NOTICE]</b>\nDhanHQ API may require Railway cloud IP for order execution. Please ensure service is deployed on Railway.", parse_mode="HTML")
                 elif out and "Session lock" in out:
                     bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[SESSION LOCK]</b> Session trade cap reached for today.", parse_mode="HTML")
                 else:
@@ -334,18 +334,18 @@ def _register_handlers(bot):
             return
 
         help_text = (
-            "[UPSTOX LIVE ALGORITHMIC ENGINE]\n"
+            "[DHAN LIVE ALGORITHMIC ENGINE]\n"
             "-------------------------------------------\n"
             "Available Commands:\n"
             "/start   - Launch live trading pipeline ('python main.py --live --auto-approve')\n"
-            "/status  - Live Wallet Balance & Bot Health\n"
+            "/status  - Live DhanHQ Wallet Balance & Bot Health\n"
             "/report  - Download today's Live EOD HTML report\n"
             "/trades  - View today's executed trade log\n"
             "/stop    - Emergency Pause (Kill Switch)\n"
             "/resume  - Re-enable Trading Engine\n"
             "/help    - Show this help message\n"
             "-------------------------------------------\n"
-            "Engine Version: v2.0 (100% Real Live Production)"
+            "Engine Version: v3.0 (DhanHQ Live Production)"
         )
         bot.reply_to(message, help_text, reply_markup=_build_action_keyboard(telebot))
 
@@ -394,7 +394,7 @@ def _register_handlers(bot):
                     if out and ("LIVE LIMIT ORDER PLACED" in out or "CLOSED" in out or "EXECUTED" in out or "TARGET HIT" in out):
                         bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[PIPELINE EXECUTED SUCCESSFULLY]</b>\n\n<pre>{out[-600:]}</pre>", parse_mode="HTML")
                     elif out and "UDAPI1154" in out:
-                        bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[UPSTOX IP RESTRICTION]</b>\nUpstox blocked local origin IP (UDAPI1154). Order execution must run on Railway cloud.", parse_mode="HTML")
+                        bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[DHAN API NOTICE]</b>\nDhanHQ API may require Railway cloud IP for order execution. Please ensure service is deployed on Railway.", parse_mode="HTML")
                     elif out and "Session lock" in out:
                         bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[SESSION LOCK]</b> Session trade cap reached for today.", parse_mode="HTML")
                     else:

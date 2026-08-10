@@ -179,7 +179,3 @@ class AsyncDhanWebSocketMonitor:
                 await asyncio.sleep(backoff_delay)
 
         return self.monitor.entry_premium, "MONITOR_STOPPED"
-
-
-# Alias for backward compatibility
-AsyncUpstoxWebSocketMonitor = AsyncDhanWebSocketMonitor

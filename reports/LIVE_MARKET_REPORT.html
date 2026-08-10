@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>EOD LIVE Dashboard | 2026-08-10</title>
+    <title>DhanHQ Live Audit Dashboard | 2026-08-11</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -51,7 +51,7 @@
 
         /* HEADER GLASS CARD */
         .header {
-            background: linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.85));
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(15, 23, 42, 0.85));
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
             border: 1px solid var(--border-highlight);
@@ -80,14 +80,14 @@
             position: absolute;
             top: 0; left: 0; right: 0;
             height: 3px;
-            background: linear-gradient(90deg, #38bdf8, #818cf8, #a855f7);
+            background: linear-gradient(90deg, #10b981, #38bdf8, #a855f7);
         }
 
         .header-title h1 {
             font-family: 'Plus Jakarta Sans', sans-serif;
             font-size: 20px;
             font-weight: 800;
-            background: linear-gradient(135deg, #38bdf8, #818cf8);
+            background: linear-gradient(135deg, #34d399, #38bdf8);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             margin-bottom: 4px;
@@ -105,6 +105,22 @@
             display: flex;
             align-items: center;
             gap: 6px;
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--accent-green);
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 10px var(--accent-green);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
         }
 
         .badges {
@@ -171,8 +187,8 @@
         }
 
         .metric-card.primary {
-            border-color: rgba(56, 189, 248, 0.3);
-            background: linear-gradient(145deg, rgba(56, 189, 248, 0.08), rgba(15, 23, 42, 0.8));
+            border-color: rgba(16, 185, 129, 0.3);
+            background: linear-gradient(145deg, rgba(16, 185, 129, 0.08), rgba(15, 23, 42, 0.8));
         }
 
         .metric-label {
@@ -289,15 +305,6 @@
             font-family: monospace;
             font-weight: 700;
             color: var(--accent-blue);
-        }
-
-        .status-pill {
-            font-size: 10px;
-            font-weight: 800;
-            padding: 4px 10px;
-            border-radius: 20px;
-            display: inline-block;
-            text-transform: uppercase;
             color: var(--text-muted);
         }
 
@@ -391,102 +398,66 @@
         <!-- Header Banner -->
         <div class="header">
             <div class="header-title">
-                <h1>INTRADAY OPTIONS TRADING DASHBOARD</h1>
-                <div class="header-subtitle">Upstox API v2 Autonomous Options Execution Engine</div>
+                <h1>REAL-TIME DHANHQ LIVE MARKET DASHBOARD</h1>
+                <div class="header-subtitle">100% Real Live Trading Audit (Zero Dry-Run / Zero Mock Data)</div>
             </div>
             <div class="badges">
-                <span class="badge badge-mode-live">
-                    🚀 LIVE PRODUCTION
-                </span>
-                <span class="badge badge-security">🔒 READ-ONLY 100% SECURE</span>
-                <span class="badge badge-date">📅 2026-08-10</span>
+                <span class="badge badge-live">🚀 LIVE PRODUCTION TRADES ONLY</span>
+                <span class="badge badge-security">🔒 DHAN API SYNCED</span>
+                <span class="badge badge-date">📅 2026-08-11</span>
             </div>
         </div>
 
         <!-- Metrics Grid -->
         <div class="metrics-grid">
             <div class="metric-card">
-                <div class="metric-label">Real-Time Wallet Balance</div>
-                <div class="metric-value" style="color: var(--accent-blue);">Rs 1,258.00</div>
-                <div class="metric-subtext">Initial Base Capital: Rs 1,258.00</div>
+                <div class="metric-label">DhanHQ Live Available Cash</div>
+                <div class="metric-value" style="color: var(--accent-green);">Rs 1,000.00</div>
+                <div class="metric-subtext">Used Margin: Rs 0.00</div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">Net Daily PnL</div>
+                <div class="metric-label">Live Daily Net PnL</div>
                 <div class="metric-value pnl-positive">
-                    +Rs 54.75
+                    +Rs 0.00
                 </div>
                 <div class="metric-subtext pnl-positive">
-                    +4.35% Net Return
+                    Real Live Realized Return
                 </div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">Daily Trades Executed</div>
-                <div class="metric-value" style="color: var(--text-main);">1 / 1</div>
-                <div class="metric-subtext">Max Cap: 1 Trade / Day Hard Lock</div>
+                <div class="metric-label">Live Trades Executed</div>
+                <div class="metric-value" style="color: var(--text-main);">0 / 1</div>
+                <div class="metric-subtext">Max Daily Cap: 1 Trade</div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">Win Rate</div>
-                <div class="metric-value" style="color: var(--accent-green);">100.0%</div>
-                <div class="metric-subtext">1 Wins / 0 Losses</div>
+                <div class="metric-label">Live Win Rate</div>
+                <div class="metric-value" style="color: var(--accent-amber);">0.0%</div>
+                <div class="metric-subtext">0 Wins / 0 Losses</div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">Total Friction Fees</div>
-                <div class="metric-value" style="color: var(--accent-purple);">Rs 20.00</div>
-                <div class="metric-subtext">Brokerage + STT + Txn Fee + GST</div>
+                <div class="metric-label">Live Taxes & Friction</div>
+                <div class="metric-value" style="color: var(--accent-purple);">Rs 0.00</div>
+                <div class="metric-subtext">Brokerage + STT + Exchange + GST</div>
             </div>
         </div>
 
-        <!-- Executed Trade Log Table -->
+        <!-- Executed Live Trade Log Table -->
         <div class="card-table">
             <div class="table-title">
-                <span>Executed Intraday Option Trades (LIVE PRODUCTION)</span>
-                <span style="font-size: 13px; font-weight: 500; color: var(--text-muted);">Timestamped Session Audit</span>
+                <span>Executed Live Market Option Trades</span>
+                <span style="font-size: 13px; font-weight: 500; color: var(--accent-green);">Filtered Strictly: LIVE Execution Mode</span>
             </div>
 
             
-            <div class="table-responsive">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Trade ID</th>
-                        <th>Time</th>
-                        <th>Option Contract</th>
-                        <th>Qty (Lot)</th>
-                        <th>Entry Premium</th>
-                        <th>Exit Premium</th>
-                        <th>Friction Fees</th>
-                        <th>Net PnL</th>
-                        <th>Execution Reason</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    
-                    <tr>
-                        <td style="color: var(--text-muted);">#1</td>
-                        <td>11:18:52</td>
-                        <td><span class="symbol-badge">NIFTY_24900_CE_11_AUG_26</span></td>
-                        <td>65 sh</td>
-                        <td>Rs 9.80</td>
-                        <td>Rs 10.95</td>
-                        <td style="color: var(--accent-purple);">Rs 20.00</td>
-                        <td class="pnl-positive">
-                            <strong>+Rs 54.75</strong>
-                        </td>
-                        <td>
-                            
-                                <span class="reason-tag tag-sl">🛑 STOP LOSS (-12%)</span>
-                            
-                        </td>
-                    </tr>
-                    
-                </tbody>
-            </table>
+            <div class="empty-state">
+                <p>No real live market option trades have been executed yet today.</p>
+                <p style="font-size: 12px; margin-top: 6px; color: var(--text-muted);">Execute 'python main.py --live' during market hours (Mon-Fri 09:15 - 15:30 IST) to place live trades.</p>
             </div>
             
         </div>
 
         <div class="footer">
-            <p>Upstox API v2 Autonomous Options Execution Engine | Security Verified READ-ONLY Fund Compliance</p>
+            <p>DhanHQ API v2 Live Real-Time Production Reporter | 0% Dry-Run Contamination Verified</p>
         </div>
     </div>
 </body>

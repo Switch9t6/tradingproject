@@ -11,7 +11,6 @@ DHAN_ACCESS_TOKEN = os.getenv("DHAN_ACCESS_TOKEN", "")
 # DhanHQ API Endpoints
 DHAN_API_BASE_URL = "https://api.dhan.co/v2"
 DHAN_RENEW_TOKEN_URL = "https://api.dhan.co/v2/RenewToken"
-UPSTOX_API_BASE_URL = DHAN_API_BASE_URL
 
 # Security & Read-Only Capital Constraints
 INITIAL_WALLET_CAPITAL = 1000.0           # Actual Dhan Live Wallet Available Cash (INR 1,000.00)

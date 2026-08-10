@@ -1,8 +1,7 @@
 """
-Upstox Trader Proxy Module (Deprecation & Migration Proxy)
-Delegates all execution and fund inspection calls directly to DhanTrader (dhanhq SDK v2).
+DhanHQ Trader Proxy (Legacy Compatibility Stub)
+================================================
+This module is kept as a compatibility stub only.
+All real execution is handled by execution.dhan_trader.DhanTrader.
 """
-from execution.dhan_trader import DhanTrader, renew_dhan_access_token
-
-# Backward compatibility alias
-UpstoxOptionsTrader = DhanTrader
+from execution.dhan_trader import DhanTrader  # noqa: F401 - re-exported for any legacy imports

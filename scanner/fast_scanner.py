@@ -5,13 +5,13 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from config.settings import UPSTOX_API_BASE_URL, MIN_VOLUME_SPIKE_RATIO, MIN_PRICE_MOMENTUM_PCT
+from config.settings import DHAN_API_BASE_URL, MIN_VOLUME_SPIKE_RATIO, MIN_PRICE_MOMENTUM_PCT
 
 def fetch_single_stock_candles(symbol: str, instrument_key: str, access_token: str, session: requests.Session) -> Optional[Dict[str, Any]]:
     """
     Fetch intraday 5-minute candles for a single stock and compute volume spike ratio & price momentum.
     """
-    url = f"{UPSTOX_API_BASE_URL}/historical-candle/{instrument_key}/5minute/2026-08-07/2026-08-07"
+    url = f"{DHAN_API_BASE_URL}/historical-candle/{instrument_key}/5minute/2026-08-07/2026-08-07"
     headers = {"Accept": "application/json"}
     if access_token and not access_token.startswith("MOCK"):
         headers["Authorization"] = f"Bearer {access_token}"
@@ -23,7 +23,7 @@ def fetch_single_stock_candles(symbol: str, instrument_key: str, access_token: s
             if len(candles) >= 12:
                 # Schema: [timestamp, open, high, low, close, volume, open_interest]
                 df = pd.DataFrame(candles, columns=["ts", "open", "high", "low", "close", "volume", "oi"])
-                latest_close = df["close"].iloc[0] # Upstox candles are reverse-chronological
+                latest_close = df["close"].iloc[0] # Dhan candles are reverse-chronological
                 first_open = df["open"].iloc[-1]
                 
                 # Volume spike: latest bar volume vs 20-period avg volume

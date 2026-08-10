@@ -409,6 +409,3 @@ class DhanTrader:
 
         return trade_summary
 
-
-# Upstox Trader Proxy for backwards compatibility
-UpstoxOptionsTrader = DhanTrader

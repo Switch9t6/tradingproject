@@ -12,7 +12,7 @@ from scanner.macro_sector_engine import MacroSectorNewsEngine
 from scanner.crude_scanner import scan_mcx_crude_oil
 from scanner.crude_news_engine import is_crude_news_blackout_window
 from scanner.smart_scanner import scan_smart_opportunities
-from execution.dhan_trader import DhanTrader, renew_dhan_access_token, UpstoxOptionsTrader
+from execution.dhan_trader import DhanTrader, renew_dhan_access_token
 from execution.telegram_control import start_telegram_listener_background, is_bot_disabled
 from reporting.eod_reporter import generate_eod_report
 from config.settings import (

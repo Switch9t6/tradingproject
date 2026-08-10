@@ -16,7 +16,7 @@ from config.settings import (
     MCX_CRUDE_LOT_SIZE,
     MCX_CRUDE_STRIKE_STEP,
     MCX_CRUDE_MIN_ATR,
-    UPSTOX_API_BASE_URL
+    DHAN_API_BASE_URL
 )
 from scanner.macro_sector_engine import MacroSectorNewsEngine
 from scanner.crude_news_engine import is_crude_news_blackout_window, fetch_crude_oil_news
