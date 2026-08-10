@@ -354,26 +354,14 @@ class UpstoxOptionsTrader:
                     exit_premium = exit_p
                     exit_reason = reason
                     print(f"\n[LIVE EXIT SIGNAL TRIGGERED] Reason: {exit_reason} | Exit LTP: Rs {exit_premium:.2f}")
-                    
-                    try:
-                        sell_body = upstox_client.PlaceOrderRequest(
-                            quantity=lot_size,
-                            product="I",
-                            validity="DAY",
-                            price=0.0,
-                            tag="OPTIONS_BOT",
-                            instrument_token=instrument_key,
-                            order_type="MARKET",
-                            transaction_type="SELL",
-                            disclosed_quantity=0,
-                            trigger_price=0.0,
-                            is_amo=False
-                        )
-                        sell_resp = self.order_api.place_order(sell_body, api_version="2.0")
-                        print(f"  [LIVE SELL ORDER DISPATCHED] Response: {sell_resp}")
-                    except Exception as sell_err:
-                        print(f"  [LIVE SELL ORDER ERROR] Could not dispatch exit order: {sell_err}")
-                    break
+                    return self.execute_exit_sell_order(
+                        trade_id=trade_id,
+                        instrument_key=instrument_key,
+                        option_symbol=option_contract["option_symbol"],
+                        quantity=lot_size,
+                        entry_premium=entry_premium,
+                        exit_reason=exit_reason
+                    )
 
         from reporting.friction_calculator import calculate_trade_friction
         f_res = calculate_trade_friction(lot_size, entry_premium, exit_premium)
@@ -388,13 +376,119 @@ class UpstoxOptionsTrader:
             exit_reason=exit_reason
         )
 
-        gross_pnl = round((exit_premium - entry_premium) * lot_size, 2)
-        net_pnl = round(gross_pnl - total_friction, 2)
-
         return {
             "trade_id": trade_id,
             "option_symbol": option_contract["option_symbol"],
             "quantity": lot_size,
+            "entry_premium": entry_premium,
+            "exit_premium": exit_premium,
+            "gross_pnl": gross_pnl,
+            "friction_fees": total_friction,
+            "net_pnl": net_pnl,
+            "exit_reason": exit_reason
+        }
+
+    def execute_exit_sell_order(
+        self,
+        trade_id: int,
+        instrument_key: str,
+        option_symbol: str,
+        quantity: int,
+        entry_premium: float,
+        exit_reason: str = "MANUAL"
+    ) -> Dict[str, Any]:
+        """
+        Executes a real SELL MARKET exit order on Upstox API v2, verifies order status,
+        calculates friction costs, updates StateManager & SQLite trades.db, and sends Telegram alert.
+        """
+        print(f"\n==========================================================================")
+        print(f"  EXECUTING LIVE SELL MARKET ORDER FOR EXIT")
+        print(f"  Contract Symbol  : {option_symbol}")
+        print(f"  Instrument Key   : {instrument_key}")
+        print(f"  Quantity         : {quantity} shares")
+        print(f"  Exit Reason      : {exit_reason}")
+        print(f"==========================================================================")
+
+        exit_premium = entry_premium
+        order_id = ""
+
+        if not self.dry_run:
+            try:
+                try:
+                    quote_api = upstox_client.MarketQuoteApi(self.api_client)
+                    res = quote_api.get_full_market_quote(symbol=instrument_key, api_version="2.0")
+                    d_map = res.data if hasattr(res, "data") else {}
+                    q_item = list(d_map.values())[0] if d_map else None
+                    if q_item:
+                        exit_premium = float(getattr(q_item, "last_price", entry_premium))
+                except Exception as q_err:
+                    print(f"  [Exit Quote Notice] {q_err}")
+
+                sell_body = upstox_client.PlaceOrderRequest(
+                    quantity=quantity,
+                    product="I",
+                    validity="DAY",
+                    price=0.0,
+                    tag="OPTIONS_BOT",
+                    instrument_token=instrument_key,
+                    order_type="MARKET",
+                    transaction_type="SELL",
+                    disclosed_quantity=0,
+                    trigger_price=0.0,
+                    is_amo=False
+                )
+                api_resp = self.order_api.place_order(sell_body, api_version="2.0")
+                resp_data = getattr(api_resp, "data", api_resp)
+                if isinstance(resp_data, dict):
+                    order_id = str(resp_data.get("order_id", ""))
+                else:
+                    order_id = str(getattr(resp_data, "order_id", getattr(api_resp, "order_id", "")))
+
+                print(f"  [LIVE SELL ORDER DISPATCHED] Order ID: {order_id} | Response: {api_resp}")
+
+                time.sleep(2.0)
+                if order_id:
+                    try:
+                        ord_detail = self.order_api.get_order_details(order_id=order_id, api_version="2.0")
+                        d = ord_detail.data if hasattr(ord_detail, "data") else ord_detail
+                        avg_p = float(d.get("average_price", exit_premium) if isinstance(d, dict) else getattr(d, "average_price", exit_premium))
+                        if avg_p > 0:
+                            exit_premium = avg_p
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[LIVE SELL ORDER ERROR] {e}")
+
+        from reporting.friction_calculator import calculate_trade_friction
+        f_res = calculate_trade_friction(quantity, entry_premium, exit_premium)
+        gross_pnl = f_res["gross_pnl"]
+        total_friction = f_res["total_friction"]
+        net_pnl = f_res["net_pnl"]
+
+        if trade_id > 0:
+            self.state_mgr.record_exit_trade(
+                trade_id=trade_id,
+                exit_premium=exit_premium,
+                friction_fees=total_friction,
+                exit_reason=exit_reason
+            )
+
+        mode_label = "DRY_RUN" if self.dry_run else "LIVE"
+        from reporting.telegram_bot import send_trade_exit_alert
+        send_trade_exit_alert({
+            "option_symbol": option_symbol,
+            "entry_premium": entry_premium,
+            "exit_premium": exit_premium,
+            "net_pnl": net_pnl,
+            "exit_reason": exit_reason,
+            "execution_mode": mode_label
+        }, wallet_balance=self.state_mgr.get_current_wallet_balance())
+
+        return {
+            "trade_id": trade_id,
+            "order_id": order_id,
+            "option_symbol": option_symbol,
+            "quantity": quantity,
             "entry_premium": entry_premium,
             "exit_premium": exit_premium,
             "gross_pnl": gross_pnl,

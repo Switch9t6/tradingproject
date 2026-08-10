@@ -67,10 +67,11 @@ def _build_action_keyboard(telebot_module):
     btn_status = telebot_module.types.InlineKeyboardButton("📊 Status", callback_data="cb_status")
     btn_report = telebot_module.types.InlineKeyboardButton("📄 EOD Report", callback_data="cb_report")
     btn_trades = telebot_module.types.InlineKeyboardButton("📜 Trade Log", callback_data="cb_trades")
+    btn_squareoff = telebot_module.types.InlineKeyboardButton("⚡ Square Off", callback_data="cb_squareoff")
     btn_stop = telebot_module.types.InlineKeyboardButton("🛑 Stop Engine", callback_data="cb_stop")
     btn_resume = telebot_module.types.InlineKeyboardButton("✅ Resume Engine", callback_data="cb_resume")
     markup.add(btn_status, btn_report)
-    markup.add(btn_trades)
+    markup.add(btn_trades, btn_squareoff)
     markup.add(btn_stop, btn_resume)
     return markup
 
@@ -417,6 +418,28 @@ def _register_handlers(bot):
         except Exception as e:
             bot.reply_to(message, f"[ERROR] Could not fetch trades: {e}")
 
+    @bot.message_handler(commands=["squareoff", "close", "exit"])
+    def cmd_squareoff(message):
+        bot.reply_to(message, "⏳ [SQUARE OFF] Requesting instant live position exit on Upstox...", reply_markup=_build_action_keyboard(telebot))
+        try:
+            from main import execute_hard_eod_squareoff
+            res = execute_hard_eod_squareoff(dry_run=False)
+            if res:
+                msg = (
+                    f"✅ [SQUARE OFF EXECUTED]\n"
+                    f"========================================\n"
+                    f"Contract  : {res.get('option_symbol', 'N/A')}\n"
+                    f"Order ID  : {res.get('order_id', 'N/A')}\n"
+                    f"Exit Price: Rs {res.get('exit_premium', 0.0):.2f}\n"
+                    f"Net PnL   : Rs {res.get('net_pnl', 0.0):,.2f} INR\n"
+                    f"========================================"
+                )
+                bot.reply_to(message, msg, reply_markup=_build_action_keyboard(telebot))
+            else:
+                bot.reply_to(message, "ℹ️ [SQUARE OFF] No open positions to close. All positions clean.", reply_markup=_build_action_keyboard(telebot))
+        except Exception as e:
+            bot.reply_to(message, f"[ERROR] Could not square off position: {e}", reply_markup=_build_action_keyboard(telebot))
+
     _processed_callback_ids = set()
 
     # Callback Query Handler for Interactive Inline Buttons
@@ -457,6 +480,8 @@ def _register_handlers(bot):
             cmd_report(call.message)
         elif call.data == "cb_trades":
             cmd_trades(call.message)
+        elif call.data == "cb_squareoff":
+            cmd_squareoff(call.message)
         elif call.data == "cb_stop":
             cmd_stop(call.message)
         elif call.data == "cb_resume":

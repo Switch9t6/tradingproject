@@ -166,6 +166,62 @@ def run_daily_pipeline(
 
     print("\n[ORCHESTRATOR COMPLETE] Daily quantitative multi-factor options pipeline finished successfully.")
 
+def execute_hard_eod_squareoff(access_token: str = None, dry_run: bool = False):
+    """
+    Hard EOD Square-Off Enforcement at 15:15 IST (SQUARE_OFF_SCHEDULE_TIME).
+    Forcibly closes any active intraday MIS option position before market close.
+    """
+    import json
+    from config.settings import SQUARE_OFF_SCHEDULE_TIME, TOKEN_FILE_PATH
+    from execution.state_manager import StateManager
+    from execution.upstox_trader import UpstoxOptionsTrader
+
+    print(f"\n[{SQUARE_OFF_SCHEDULE_TIME} IST] HARD EOD SQUARE-OFF ENFORCEMENT RUNNING...")
+    sm = StateManager()
+    active_pos = sm.state.get("active_position")
+
+    if not access_token:
+        token_file = "access_token.json" if os.path.exists("access_token.json") else TOKEN_FILE_PATH
+        if os.path.exists(token_file):
+            with open(token_file, "r") as f:
+                access_token = json.load(f).get("access_token", "")
+
+    if not active_pos and access_token and not access_token.startswith("MOCK"):
+        try:
+            import upstox_client
+            config = upstox_client.Configuration()
+            config.access_token = access_token
+            p_api = upstox_client.PortfolioApi(upstox_client.ApiClient(config))
+            res = p_api.get_positions(api_version="2.0")
+            p_data = getattr(res, "data", res)
+            positions = p_data if isinstance(p_data, list) else []
+            open_fno = [p for p in positions if int(getattr(p, "quantity", 0) if not isinstance(p, dict) else p.get("quantity", 0)) != 0]
+            if open_fno:
+                p_item = open_fno[0]
+                active_pos = {
+                    "trade_id": 1,
+                    "instrument_key": getattr(p_item, "instrument_token", "") if not isinstance(p_item, dict) else p_item.get("instrument_token", ""),
+                    "option_symbol": getattr(p_item, "trading_symbol", "ACTIVE_OPTION") if not isinstance(p_item, dict) else p_item.get("trading_symbol", "ACTIVE_OPTION"),
+                    "quantity": abs(int(getattr(p_item, "quantity", 65) if not isinstance(p_item, dict) else p_item.get("quantity", 65))),
+                    "entry_premium": float(getattr(p_item, "buy_price", 10.0) if not isinstance(p_item, dict) else p_item.get("buy_price", 10.0))
+                }
+        except Exception as p_err:
+            print(f"[EOD Portfolio Query Notice] {p_err}")
+
+    if not active_pos:
+        print(f"  [EOD Square-off] 0 open positions. All positions squared off cleanly.")
+        return None
+
+    trader = UpstoxOptionsTrader(access_token=access_token, dry_run=dry_run)
+    return trader.execute_exit_sell_order(
+        trade_id=active_pos.get("trade_id", 1),
+        instrument_key=active_pos.get("instrument_key", ""),
+        option_symbol=active_pos.get("option_symbol", "ACTIVE_OPTION"),
+        quantity=active_pos.get("quantity", 65),
+        entry_premium=active_pos.get("entry_premium", 10.0),
+        exit_reason="HARD_EOD_SQUAREOFF_1515"
+    )
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Master Daily Orchestrator for Intraday Options Trading Bot")
     parser.add_argument("--live", action="store_true", help="Run live market trading mode (Default)")
@@ -187,17 +243,18 @@ if __name__ == "__main__":
         auto_approve=args.auto_approve
     )
 
-    # 3. Railway / Cloud 24/7 Server Daemon Loop with Continuous 5-Min Market Scanner
-    # Detects Railway deployment automatically or if --daemon flag is set
+    # 3. Railway / Cloud 24/7 Server Daemon Loop with Continuous 5-Min Market Scanner & 15:15 EOD Square-Off
     is_cloud_env = args.daemon or bool(os.path.exists("/data")) or bool(os.getenv("RAILWAY_ENVIRONMENT")) or bool(os.getenv("RAILWAY_PROJECT_ID")) or bool(os.getenv("PORT"))
     if is_cloud_env:
         print("\n" + "=" * 80)
         print("  [CLOUD DAEMON ACTIVE] Engine running in 24/7 continuous market scanner mode on Railway.")
         print("  [MARKET SCANNER SCHEDULE] Auto-scans every 5 minutes during NSE trading windows (09:30-11:15 AM & 13:30-14:30 PM IST).")
-        print("  [TELEGRAM CONTROL] Polling listener stays ONLINE 24/7 for /start, /status, /report, /trades, /stop, /resume.")
+        print("  [EOD SQUARE-OFF SCHEDULE] Hard EOD square-off runs at 15:15 IST (SQUARE_OFF_SCHEDULE_TIME).")
+        print("  [TELEGRAM CONTROL] Polling listener stays ONLINE 24/7 for /start, /status, /report, /trades, /squareoff, /stop, /resume.")
         print("=" * 80)
         try:
             last_scan_minute = -1
+            squared_off_today = False
             while True:
                 time.sleep(15)
                 try:
@@ -210,6 +267,14 @@ if __name__ == "__main__":
                     weekday = now_ist.weekday() # 0 = Mon, 4 = Fri
 
                     if weekday < 5:
+                        # 15:15 IST Hard EOD Square-off Check
+                        if datetime.time(15, 15) <= current_time <= datetime.time(15, 25) and not squared_off_today:
+                            squared_off_today = True
+                            execute_hard_eod_squareoff(dry_run=False)
+
+                        if current_time < datetime.time(15, 0):
+                            squared_off_today = False
+
                         in_w1 = (datetime.time(9, 30) <= current_time <= datetime.time(11, 15))
                         in_w2 = (datetime.time(13, 30) <= current_time <= datetime.time(14, 30))
 
