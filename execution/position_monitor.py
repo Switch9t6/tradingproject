@@ -153,9 +153,8 @@ class AsyncDhanWebSocketMonitor:
                     
                     current_ltp = self.monitor.highest_price_seen
                     try:
-                        client_id = os.getenv("DHAN_CLIENT_ID", "")
-                        from dhanhq import dhanhq
-                        dhan = dhanhq(client_id, self.access_token)
+                        from dhanhq import dhanhq, DhanContext
+                        dhan = dhanhq(DhanContext(client_id, self.access_token))
                         # Query LTP via Dhan API
                         q = dhan.get_market_quote_ltp(security_id=self.security_id)
                         data = q.get("data", q) if isinstance(q, dict) else q

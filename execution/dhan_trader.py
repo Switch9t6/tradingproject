@@ -124,9 +124,14 @@ class DhanTrader:
 
         if not self.dry_run and dhanhq is not None:
             try:
-                self.dhan = dhanhq(self.client_id, self.access_token)
+                try:
+                    from dhanhq import DhanContext
+                    ctx = DhanContext(self.client_id, self.access_token)
+                    self.dhan = dhanhq(ctx)
+                except Exception:
+                    self.dhan = dhanhq(self.client_id, self.access_token)
             except Exception as e:
-                print(f"⚠️ [Dhan Gateway Warning] Failed to initialize Dhan client: {e}. Defaulting to Dry-Run.")
+                print(f"[Dhan Gateway Notice] Failed to initialize Dhan client: {e}. Defaulting to Dry-Run.")
                 self.dhan = None
                 self.dry_run = True
         else:

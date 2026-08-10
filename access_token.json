@@ -1,6 +1,5 @@
 {
-    "date": "2026-08-10",
-    "access_token": "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1VkMyVEEiLCJqdGkiOiI2YTc5NjIwNDIwZmRjYTMwYjY1NjUxN2UiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzg2MzM5ODQ0LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3ODYzOTkyMDB9.8p1VN97Pv0-PpjfBJ096vDFmvxwvrLNAsllLrlzTQ30",
-    "token_type": "Bearer",
-    "created_at": 1786339845.6063683
+    "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzg2NDcxNzA5LCJpYXQiOjE3ODYzODUzMDksInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTEzMTI0ODc4In0.SVg7K-Psh-OVkgXH1E98cr9X86AWDT0Iu1cReC8Iy2qz-O49fUDe_1cEID1hjJALkKpWPZbNl3XuupVgwe0tNg",
+    "updated_at": "2026-08-10T23:48:00",
+    "client_id": "1113124878"
 }
