@@ -3,7 +3,7 @@ import sys
 import time
 import gzip
 import json
-import requests
+from typing import Dict, Any, Optional, List
 
 _mcx_instrument_cache = None
 _nse_instrument_cache = None
