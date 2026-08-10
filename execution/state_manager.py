@@ -157,7 +157,7 @@ class StateManager:
             print(f"[MANUAL OVERRIDE ACTIVE] Session trade cap lockout manually bypassed for {exchange} ({self.state['date']}).")
             return True
 
-        segment = "MCX_FO" if ("MCX" in str(exchange).upper()) else "NSE_FO"
+        segment = "MCX_FO" if ("MCX" in str(exchange).upper() or "CRUDE" in str(exchange).upper()) else "NSE_FO"
         
         if segment == "MCX_FO":
             count = self.state.get("MCX_FO_trades_today", 0)
@@ -203,7 +203,7 @@ class StateManager:
         today_str = datetime.date.today().isoformat()
         now_str = datetime.datetime.now().strftime("%H:%M:%S")
         
-        ex_segment = "MCX_FO" if ("MCX" in str(exchange).upper() or option_contract.get("is_mcx") or option_contract.get("underlying_symbol") == "CRUDEOIL") else "NSE_FO"
+        ex_segment = "MCX_FO" if ("MCX" in str(exchange).upper() or "CRUDE" in str(exchange).upper() or option_contract.get("is_mcx") or "CRUDE" in str(option_contract.get("underlying_symbol")).upper()) else "NSE_FO"
 
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()

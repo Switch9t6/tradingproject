@@ -111,7 +111,12 @@ class UpstoxOptionsTrader:
         +25% Target, Step-Based Trailing SL, & 30-min Time-Decay exit.
         """
         exchange = option_contract.get("exchange", "NSE_FO")
-        if option_contract.get("is_mcx") or option_contract.get("underlying_symbol") == "CRUDEOIL":
+        if (
+            option_contract.get("is_mcx")
+            or "MCX" in str(exchange).upper()
+            or "CRUDE" in str(option_contract.get("underlying_symbol")).upper()
+            or "CRUDE" in str(option_contract.get("option_symbol")).upper()
+        ):
             exchange = "MCX_FO"
 
         if not self.state_mgr.is_trade_allowed_today(exchange=exchange, override_daily_limit=override_daily_limit):
@@ -354,7 +359,7 @@ class UpstoxOptionsTrader:
                     print(f"[Live Tick Poll Warning] Could not fetch live quote: {poll_err}")
 
                 is_exit, exit_p, reason = monitor.evaluate_tick(current_ltp, elapsed_sec)
-                print(f"  [Live Position Tick] LTP: Rs {current_ltp:.2f} | Elapsed: {int(elapsed_sec)}s | Trailing SL: Rs {monitor.trailing_stop_loss:.2f}")
+                print(f"  [Live Position Tick] LTP: Rs {current_ltp:.2f} | Elapsed: {int(elapsed_sec)}s | Trailing SL: Rs {monitor.current_stop_p:.2f}")
 
                 if is_exit:
                     exit_premium = exit_p

@@ -51,7 +51,7 @@ def get_mcx_crude_option_contract(
     # Determine lot size: Standard (100 barrels) vs Mini (10 barrels)
     std_lot_cost = round(ask_price * MCX_CRUDE_LOT_SIZE, 2)
     
-    if symbol_hint == "CRUDEOILM" or (std_lot_cost > budget_cap and (ask_price * MCX_CRUDE_MINI_LOT_SIZE) <= budget_cap):
+    if symbol_hint == "CRUDEOILM" or std_lot_cost > budget_cap:
         underlying_symbol = "CRUDEOILM"
         lot_size = MCX_CRUDE_MINI_LOT_SIZE
         print(f"  [Option Mapper Notice] Using Mini Crude Contract ({underlying_symbol}, Lot Size: {lot_size} barrels) for budget cap Rs {budget_cap:,.2f} INR.")
@@ -73,6 +73,7 @@ def get_mcx_crude_option_contract(
     mapped_contract = {
         "underlying_symbol": underlying_symbol,
         "exchange": "MCX_FO",
+        "is_mcx": True,
         "option_symbol": option_symbol,
         "instrument_key": instrument_key,
         "option_type": option_type,
