@@ -269,7 +269,7 @@ class UpstoxOptionsTrader:
                 err_str = str(e)
                 if "UDAPI1154" in err_str or "static IP" in err_str:
                     print("\n" + "!" * 80)
-                    print("  ⚠️ UPSTOX API STATIC IP RESTRICTION (UDAPI1154)")
+                    print("  [WARNING] UPSTOX API STATIC IP RESTRICTION (UDAPI1154)")
                     print("  Upstox server rejected order placement because local origin IP is not whitelisted.")
                     print("  Whitelisted Static IP : 110.226.176.243 (Railway Cloud Daemon)")
                     print("  Current Request IP    : 2401:4900:1c97:8e85:f5b3:1a91:c37e:a90c")
