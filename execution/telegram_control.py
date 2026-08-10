@@ -439,15 +439,26 @@ def start_telegram_listener_background():
     def _polling_loop():
         _safe_print("[Telegram Control] Cloud polling listener started. Listening 24/7 for /start, /status, /report, /reports, /trades, /stop, /resume...")
         import time
+        try:
+            bot.remove_webhook()
+            bot.delete_webhook(drop_pending_updates=True)
+        except Exception:
+            pass
+
+        consecutive_409 = 0
         while True:
             try:
                 bot.infinity_polling(timeout=30, long_polling_timeout=20, skip_pending=True)
+                consecutive_409 = 0
             except Exception as e:
                 err_str = str(e)
                 if "409" in err_str or "Conflict" in err_str:
-                    _safe_print("[Telegram Control] 409 Conflict (container transition overlap). Retrying in 8s...")
-                    time.sleep(8)
+                    consecutive_409 += 1
+                    if consecutive_409 == 1:
+                        _safe_print("[Telegram Control] 409 Conflict (previous process shutting down). Auto-retrying in background...")
+                    time.sleep(10)
                 else:
+                    consecutive_409 = 0
                     _safe_print(f"[Telegram Control Warning] Polling glitch: {e}. Auto-reconnecting in 5s...")
                     time.sleep(5)
 
