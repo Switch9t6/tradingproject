@@ -357,6 +357,40 @@ def _register_handlers(bot):
             sm = StateManager()
             trades = sm.get_todays_trades()
 
+            # Upstox API Live Order Book Fallback if local DB is empty
+            if not trades:
+                try:
+                    import json, upstox_client
+                    from config.settings import TOKEN_FILE_PATH
+                    token_file = TOKEN_FILE_PATH if os.path.exists(TOKEN_FILE_PATH) else "access_token.json"
+                    if os.path.exists(token_file):
+                        with open(token_file, "r") as f:
+                            token = json.load(f).get("access_token", "")
+                        if token and not token.startswith("MOCK"):
+                            config = upstox_client.Configuration()
+                            config.access_token = token
+                            order_api = upstox_client.OrderApi(upstox_client.ApiClient(config))
+                            res = order_api.get_order_book(api_version="2.0")
+                            book_data = getattr(res, "data", res)
+                            filled_orders = [
+                                o for o in (book_data if isinstance(book_data, list) else [])
+                                if str(getattr(o, "status", "") if not isinstance(o, dict) else o.get("status", "")).lower() == "complete"
+                            ]
+                            
+                            if filled_orders:
+                                lines = [f"[TODAY'S LIVE UPSTOX EXPUTED TRADES] ({len(filled_orders)} orders)\n========================================"]
+                                for o in filled_orders:
+                                    sym = getattr(o, "trading_symbol", None) or (o.get("trading_symbol") if isinstance(o, dict) else "N/A")
+                                    tx = getattr(o, "transaction_type", "BUY") if not isinstance(o, dict) else o.get("transaction_type", "BUY")
+                                    avg_p = float(getattr(o, "average_price", 0.0) if not isinstance(o, dict) else o.get("average_price", 0.0))
+                                    qty = int(getattr(o, "quantity", 0) if not isinstance(o, dict) else o.get("quantity", 0))
+                                    lines.append(f"• {tx} {sym} ({qty} shares) @ Rs {avg_p:.2f}")
+                                lines.append("========================================")
+                                bot.reply_to(message, "\n".join(lines), reply_markup=_build_action_keyboard(telebot))
+                                return
+                except Exception as api_err:
+                    _safe_print(f"[Trades Order Book Fallback Notice] {api_err}")
+
             if not trades:
                 bot.reply_to(message, "[TRADES] No live trades executed today.", reply_markup=_build_action_keyboard(telebot))
                 return
