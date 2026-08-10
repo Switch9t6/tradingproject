@@ -100,7 +100,7 @@ def resolve_atm_option_contract(
     Option Selection Guardrails for NSE Equity & MCX Commodity Candidates.
     Routes MCX Crude Oil candidates to get_mcx_crude_option_contract().
     """
-    if candidate.get("is_mcx") or candidate.get("symbol") == MCX_CRUDE_SYMBOL:
+    if candidate.get("is_mcx") or candidate.get("symbol") in [MCX_CRUDE_SYMBOL, "CRUDEOILM"]:
         return get_mcx_crude_option_contract(
             spot_price=candidate["spot_price"],
             direction=candidate["direction"],
