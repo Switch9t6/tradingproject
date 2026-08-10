@@ -650,11 +650,15 @@ def generate_live_market_report(date_str: str = None) -> str:
     )
     
     report_path = os.path.join(REPORTS_DIR, "LIVE_MARKET_REPORT.html")
+    dated_report_path = os.path.join(REPORTS_DIR, f"EOD_Report_LIVE_{date_str}.html")
     
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html_output)
 
-    print(f"\n[Live Reporter] Pure Live HTML dashboard saved to single active report file: '{report_path}'")
+    with open(dated_report_path, "w", encoding="utf-8") as f:
+        f.write(html_output)
+
+    print(f"\n[Live Reporter] HTML dashboard saved to active report files:\n  1. '{report_path}'\n  2. '{dated_report_path}'")
     return report_path
 
 if __name__ == "__main__":

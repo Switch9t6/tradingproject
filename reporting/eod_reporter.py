@@ -644,13 +644,17 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
         trades=trades
     )
     
-    report_filename = "LIVE_MARKET_REPORT.html"
-    report_path = os.path.join(REPORTS_DIR, report_filename)
+    report_path = os.path.join(REPORTS_DIR, "LIVE_MARKET_REPORT.html")
+    file_prefix = "EOD_Report_DRYRUN_" if dry_run else "EOD_Report_LIVE_"
+    dated_report_path = os.path.join(REPORTS_DIR, f"{file_prefix}{date_str}.html")
     
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html_output)
+
+    with open(dated_report_path, "w", encoding="utf-8") as f:
+        f.write(html_output)
         
-    print(f"\n[EOD Reporter] HTML dashboard successfully saved to single active report file: '{report_path}'")
+    print(f"\n[EOD Reporter] HTML dashboard saved to active report files:\n  1. '{report_path}'\n  2. '{dated_report_path}'")
     return report_path
 
 if __name__ == "__main__":
