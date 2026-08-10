@@ -103,6 +103,12 @@ def run_daily_pipeline(
         print("[Error] Failed to acquire valid access token. Aborting pipeline.")
         return
 
+    # INGEST LIVE WALLET BALANCE BEFORE SCANNING FOR OPPORTUNITIES
+    trader = UpstoxOptionsTrader(access_token=access_token, dry_run=False, force_reset=reset_state)
+    live_wallet = trader.get_read_only_wallet_balance()
+    budget_cap = MICRO_CAPITAL_BUDGET_CAP if micro_capital else live_wallet
+    print(f"  [Wallet Ingestion Verified] Upstox Live Available Cash: Rs {live_wallet:,.2f} INR | Active Single Lot Budget Cap: Rs {budget_cap:,.2f} INR")
+
     # Economic Calendar News Blackout Check
     if not can_trade_during_news_window():
         print("[Pipeline] Scheduled high-impact macro news event blackout active. Pipeline complete for today.")
