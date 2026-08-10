@@ -523,12 +523,28 @@ def _register_handlers(bot):
         except Exception as e:
             bot.reply_to(message, f"❌ Failed to update Dhan token: {e}")
 
+def _get_local_ip() -> str:
+    """Helper to retrieve machine's local network IP address."""
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
     @bot.message_handler(commands=["report", "reports", "report_csv"])
     def cmd_report(message):
-        # Single Unified Report Command: Returns summary text & interactive Web App URL button
+        # Single Unified Report Command: Returns summary text & interactive Web App URL
         try:
             import secrets
+            import html
+
             session_token = secrets.token_urlsafe(16)
+            port = os.getenv("PORT", "5000")
 
             railway_url = os.getenv("RAILWAY_STATIC_URL", "")
             public_url = os.getenv("WEB_REPORT_URL", os.getenv("PUBLIC_URL", ""))
@@ -537,18 +553,23 @@ def _register_handlers(bot):
                 base_url = public_url.rstrip("/")
                 if not base_url.startswith("http"):
                     base_url = f"https://{base_url}"
+                primary_url = f"{base_url}/report?token={session_token}"
+                lan_url = None
             elif railway_url:
                 base_url = f"https://{railway_url.rstrip('/')}"
+                primary_url = f"{base_url}/report?token={session_token}"
+                lan_url = None
             else:
-                port = os.getenv("PORT", "5000")
-                base_url = f"http://localhost:{port}"
+                local_ip = _get_local_ip()
+                primary_url = f"http://{local_ip}:{port}/report?token={session_token}"
+                lan_url = f"http://localhost:{port}/report?token={session_token}"
 
-            web_app_url = f"{base_url}/report?token={session_token}"
-
-            import html
-            escaped_url = html.escape(web_app_url)
-
-            is_https = base_url.startswith("https://") and "localhost" not in base_url and "127.0.0.1" not in base_url
+            # Ensure background web server is running on target port
+            try:
+                from web.server import start_web_server_background
+                start_web_server_background(port=int(port))
+            except Exception:
+                pass
 
             msg_text = (
                 "📊 <b>[QUANT PERFORMANCE REPORT DASHBOARD]</b>\n"
@@ -571,24 +592,34 @@ def _register_handlers(bot):
             except Exception:
                 pass
 
-            msg_text += (
-                f'👉 <a href="{escaped_url}"><b>Open Interactive Performance Report</b></a> 👈\n\n'
-                f'<code>{escaped_url}</code>\n\n'
-                "<i>Tap the link above to view interactive dashboard & download PDF reports.</i>"
-            )
+            escaped_primary = html.escape(primary_url)
+            msg_text += f'👉 <a href="{escaped_primary}"><b>Open Interactive Performance Report</b></a> 👈\n\n'
+
+            if lan_url:
+                escaped_lan = html.escape(lan_url)
+                msg_text += (
+                    f"📱 <b>Phone / WiFi Link:</b>\n<code>{escaped_primary}</code>\n\n"
+                    f"💻 <b>PC Local Link:</b>\n<code>{escaped_lan}</code>\n\n"
+                )
+            else:
+                msg_text += f"<code>{escaped_primary}</code>\n\n"
+
+            msg_text += "<i>Tap the link above to view the interactive dashboard & download PDF reports.</i>"
+
+            is_https = primary_url.startswith("https://") and "localhost" not in primary_url and "127.0.0.1" not in primary_url
 
             if is_https:
                 try:
                     markup = telebot.types.InlineKeyboardMarkup(row_width=1)
-                    btn_web = telebot.types.InlineKeyboardButton("📊 Open Interactive Performance Report", url=web_app_url)
+                    btn_web = telebot.types.InlineKeyboardButton("📊 Open Interactive Performance Report", url=primary_url)
                     markup.add(btn_web)
                     bot.reply_to(message, msg_text, parse_mode="HTML", reply_markup=markup)
-                except Exception as btn_err:
+                except Exception:
                     bot.reply_to(message, msg_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
             else:
                 bot.reply_to(message, msg_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
 
-            _safe_print(f"[Telegram Control] Sent interactive report URL: {web_app_url}")
+            _safe_print(f"[Telegram Control] Sent interactive report URL: {primary_url}")
         except Exception as e:
             bot.reply_to(message, f"❌ Failed to generate report link: {e}")
 
