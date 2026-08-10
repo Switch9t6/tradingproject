@@ -266,7 +266,18 @@ class UpstoxOptionsTrader:
                         print(f"  [Cancel Order Error] Could not cancel order {order_id}: {cancel_err}")
                     return None
             except Exception as e:
-                print(f"[LIVE ORDER ERROR] Failed to place order: {e}. Trade execution aborted safely.")
+                err_str = str(e)
+                if "UDAPI1154" in err_str or "static IP" in err_str:
+                    print("\n" + "!" * 80)
+                    print("  ⚠️ UPSTOX API STATIC IP RESTRICTION (UDAPI1154)")
+                    print("  Upstox server rejected order placement because local origin IP is not whitelisted.")
+                    print("  Whitelisted Static IP : 110.226.176.243 (Railway Cloud Daemon)")
+                    print("  Current Request IP    : 2401:4900:1c97:8e85:f5b3:1a91:c37e:a90c")
+                    print("  Action Options        : 1. Deploy & run on Railway where origin IP matches 110.226.176.243.")
+                    print("                          2. Or run without --live (Simulation Dry-Run Mode).")
+                    print("!" * 80 + "\n")
+                else:
+                    print(f"[LIVE ORDER ERROR] Failed to place order: {e}. Trade execution aborted safely.")
                 return None
 
         mode_label = "DRY_RUN" if self.dry_run else "LIVE"
