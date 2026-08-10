@@ -250,6 +250,10 @@ class StateManager:
         conn.close()
         return trades
 
+    def get_todays_trades(self, execution_mode: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Alias for get_today_trades."""
+        return self.get_today_trades(execution_mode=execution_mode)
+
     def _check_date_reset(self):
         today_str = datetime.date.today().isoformat()
         if self.state.get("date") != today_str:
