@@ -193,7 +193,7 @@ class UpstoxOptionsTrader:
             approved = False
             from execution.telegram_control import request_telegram_trade_approval, TELEGRAM_BOT_TOKEN
             if TELEGRAM_BOT_TOKEN and not TELEGRAM_BOT_TOKEN.startswith("your_"):
-                print("\n📱 [TELEGRAM PROMPT SENT] Waiting 60s for user confirmation on Telegram...")
+                print("\n[TELEGRAM PROMPT SENT] Waiting 60s for user confirmation on Telegram...")
                 approved = request_telegram_trade_approval(
                     option_symbol=option_symbol,
                     lot_size=lot_size,
@@ -205,7 +205,7 @@ class UpstoxOptionsTrader:
                 )
             else:
                 try:
-                    user_input = input("\n👉 Do you authorize placing this order? [Y/n]: ").strip().lower()
+                    user_input = input("\nDo you authorize placing this order? [Y/n]: ").strip().lower()
                     approved = user_input in ["y", "yes", ""]
                 except Exception:
                     approved = True

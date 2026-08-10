@@ -91,7 +91,8 @@ def run_mcx_crude_pipeline(
     reset_state: bool = False,
     micro_capital: bool = False,
     override_daily_limit: bool = False,
-    auto_approve: bool = False
+    auto_approve: bool = False,
+    dry_run: bool = False
 ):
     """
     SESSION 2: MCX Commodity Options Trading Pipeline (Crude Oil).
@@ -160,14 +161,14 @@ def run_mcx_crude_pipeline(
         return
 
     # 7. Execute Order Gateway & Position Monitor
-    trader = UpstoxOptionsTrader(access_token=access_token, dry_run=False, force_reset=reset_state)
+    trader = UpstoxOptionsTrader(access_token=access_token, dry_run=dry_run, force_reset=reset_state)
     trade_result = trader.execute_option_trade(
         option_contract,
         override_daily_limit=override_daily_limit,
         auto_approve=auto_approve
     )
 
-    generate_eod_report(dry_run=False)
+    generate_eod_report(dry_run=dry_run)
     print("\n[MCX SESSION COMPLETE] Crude Oil quantitative pipeline finished successfully.")
 
 def run_daily_pipeline(
@@ -175,7 +176,8 @@ def run_daily_pipeline(
     micro_capital: bool = False,
     override_daily_limit: bool = False,
     auto_approve: bool = False,
-    session: str = "auto"
+    session: str = "auto",
+    dry_run: bool = False
 ):
     """
     Master Orchestrator supporting Dual-Session Execution:
@@ -191,7 +193,8 @@ def run_daily_pipeline(
             reset_state=reset_state,
             micro_capital=micro_capital,
             override_daily_limit=override_daily_limit,
-            auto_approve=auto_approve
+            auto_approve=auto_approve,
+            dry_run=dry_run
         )
         return
 
@@ -343,7 +346,8 @@ def execute_hard_eod_squareoff(access_token: str = None, dry_run: bool = False, 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Master Dual-Session Orchestrator for NSE Equity & MCX Crude Oil Options")
-    parser.add_argument("--live", action="store_true", help="Run live market trading mode (Default)")
+    parser.add_argument("--live", action="store_true", help="Run live market trading mode")
+    parser.add_argument("--dry-run", action="store_true", help="Run simulation execution mode (no live order placement)")
     parser.add_argument("--session", type=str, choices=["nse", "mcx", "auto"], default="auto", help="Specify trading session: 'nse' (09:00-15:30), 'mcx' (17:00-23:15), or 'auto'")
     parser.add_argument("--crude-only", action="store_true", help="Shortcut to run Session 2 MCX Crude Oil Options pipeline")
     parser.add_argument("--micro-capital", action="store_true", help="Enable Micro-Capital Live Test mode with Rs 250 budget cap")
@@ -354,6 +358,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     session_target = "mcx" if args.crude_only else args.session
+    is_dry_run = args.dry_run or (not args.live)
     
     # 1. Start Non-Blocking Telegram Control Listener
     start_telegram_listener_background()
@@ -364,7 +369,8 @@ if __name__ == "__main__":
         micro_capital=args.micro_capital,
         override_daily_limit=args.override_daily_limit,
         auto_approve=args.auto_approve,
-        session=session_target
+        session=session_target,
+        dry_run=is_dry_run
     )
 
     # 3. Railway / Cloud 24/7 Server Daemon Loop with Dual-Session Continuous Scanner
