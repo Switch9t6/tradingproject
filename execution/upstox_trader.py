@@ -151,8 +151,8 @@ class UpstoxOptionsTrader:
             print(f"[Trader Guardrail Block] Option Bid-Ask spread ({spread_pct:.2f}%) exceeds 1.5% limit. Execution aborted.")
             return None
 
-        # 2. Aggressive Limit Price Formula: Limit = Bid + 0.25 * (Ask - Bid)
-        limit_price = round(bid_price + 0.25 * (ask_price - bid_price), 2)
+        # 2. Limit Price set to Ask Price for instant execution fill
+        limit_price = round(ask_price, 2)
         if limit_price <= 0:
             limit_price = round(ask_price * (1.0 + LIMIT_ORDER_BUFFER_PCT), 2)
             
