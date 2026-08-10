@@ -388,9 +388,10 @@ if __name__ == "__main__":
                         if (in_nse_w1 or in_nse_w2 or in_mcx_w) and (minute % 5 == 0) and (minute != last_scan_minute):
                             from execution.state_manager import StateManager
                             sm = StateManager()
-                            if sm.is_trade_allowed_today(override_daily_limit=args.override_daily_limit) and not is_bot_disabled():
+                            target_session = "mcx" if in_mcx_w else "nse"
+                            ex_segment = "MCX_FO" if target_session == "mcx" else "NSE_FO"
+                            if sm.is_trade_allowed_today(exchange=ex_segment, override_daily_limit=args.override_daily_limit) and not is_bot_disabled():
                                 last_scan_minute = minute
-                                target_session = "mcx" if in_mcx_w else "nse"
                                 print(f"\n⏰ [5-MIN SCAN TRIGGER] Auto-scanning {target_session.upper()} market at {now_ist.strftime('%H:%M:%S')} IST...")
                                 run_daily_pipeline(
                                     reset_state=False,

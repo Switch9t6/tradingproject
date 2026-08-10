@@ -110,8 +110,12 @@ class UpstoxOptionsTrader:
         sizers trade based on updated real-time wallet balance, attaches 5-second fill timeout,
         +25% Target, Step-Based Trailing SL, & 30-min Time-Decay exit.
         """
-        if not self.state_mgr.is_trade_allowed_today(override_daily_limit=override_daily_limit):
-            print("[Trader] Trade execution aborted: Daily 1-trade limit reached.")
+        exchange = option_contract.get("exchange", "NSE_FO")
+        if option_contract.get("is_mcx") or option_contract.get("underlying_symbol") == "CRUDEOIL":
+            exchange = "MCX_FO"
+
+        if not self.state_mgr.is_trade_allowed_today(exchange=exchange, override_daily_limit=override_daily_limit):
+            print(f"[Trader] Trade execution aborted: Session cap of 1 trade per day reached for {exchange}.")
             return None
 
         # Fetch Real-Time Wallet Balance
@@ -265,7 +269,8 @@ class UpstoxOptionsTrader:
             entry_premium=entry_premium,
             target_p=target_price,
             stop_p=initial_stop_price,
-            execution_mode=mode_label
+            execution_mode=mode_label,
+            exchange=exchange
         )
 
         # Trigger Telegram Trade Entry Alert

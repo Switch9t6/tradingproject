@@ -8,9 +8,10 @@ from config.settings import STATE_FILE_PATH, DB_FILE_PATH, LOGS_DIR, MAX_DAILY_T
 class StateManager:
     """
     Persistent state manager using SQLite (logs/trades.db) and state.json to enforce:
-    1. HARD CAP of MAX 1 TRADE PER DAY.
-    2. Dynamic Real-Time Wallet Balance tracking across winning and losing trades.
-    3. Strict separation of LIVE vs DRY_RUN trade audit logs.
+    1. Session-Isolated Dynamic Trade Caps (Max 1 trade per session: NSE_FO & MCX_FO).
+    2. Automatic Midnight IST Reset.
+    3. Dynamic Real-Time Wallet Balance tracking across winning and losing trades.
+    4. Telegram alerting when a session cap is reached.
     """
     def __init__(self, db_path: str = DB_FILE_PATH, state_path: str = STATE_FILE_PATH, force_reset: bool = False):
         self.db_path = db_path
@@ -32,6 +33,7 @@ class StateManager:
                 entry_time TEXT NOT NULL,
                 exit_time TEXT,
                 execution_mode TEXT DEFAULT 'DRY_RUN',
+                exchange TEXT DEFAULT 'NSE_FO',
                 underlying_symbol TEXT NOT NULL,
                 option_symbol TEXT NOT NULL,
                 option_type TEXT NOT NULL,
@@ -50,21 +52,29 @@ class StateManager:
         """)
         conn.commit()
         
-        # Column migration check for existing DBs
+        # Column migration checks for existing DBs
         cursor.execute("PRAGMA table_info(trades)")
         columns = [column[1] for column in cursor.fetchall()]
         if "execution_mode" not in columns:
             cursor.execute("ALTER TABLE trades ADD COLUMN execution_mode TEXT DEFAULT 'DRY_RUN'")
-            conn.commit()
-            
+        if "exchange" not in columns:
+            cursor.execute("ALTER TABLE trades ADD COLUMN exchange TEXT DEFAULT 'NSE_FO'")
+        conn.commit()
         conn.close()
 
     def _default_state(self) -> Dict[str, Any]:
         today_str = datetime.date.today().isoformat()
         return {
             "date": today_str,
-            "trades_today_count": 0,
-            "is_locked_for_today": False,
+            "last_reset_date": today_str,
+            "NSE_FO_trades_today": 0,
+            "MCX_FO_trades_today": 0,
+            "is_nse_locked_today": False,
+            "is_mcx_locked_today": False,
+            "session_cap_alerted": {
+                "NSE_FO": False,
+                "MCX_FO": False
+            },
             "active_trade_id": None,
             "active_position": None,
             "current_wallet_balance": INITIAL_WALLET_CAPITAL
@@ -76,7 +86,7 @@ class StateManager:
         """
         state = self._default_state()
         self._save_state(state)
-        print(f"[State Manager] Daily state cleanly reset for {state['date']}. Wallet Balance: Rs {state['current_wallet_balance']:,.2f} INR.")
+        print(f"[State Manager] Daily session state cleanly reset for {state['date']}. Wallet Balance: Rs {state['current_wallet_balance']:,.2f} INR.")
         return state
 
     def _load_or_init_state(self) -> Dict[str, Any]:
@@ -85,11 +95,15 @@ class StateManager:
             try:
                 with open(self.state_path, 'r') as f:
                     state = json.load(f)
-                    if state.get("date") != today_str:
-                        print(f"[State Manager] New trading session detected ({today_str}). Updating daily session state.")
+                    if state.get("date") != today_str or state.get("last_reset_date") != today_str:
+                        print(f"[State Manager] New trading session detected ({today_str}). Resetting session-isolated counters.")
                         state["date"] = today_str
-                        state["trades_today_count"] = 0
-                        state["is_locked_for_today"] = False
+                        state["last_reset_date"] = today_str
+                        state["NSE_FO_trades_today"] = 0
+                        state["MCX_FO_trades_today"] = 0
+                        state["is_nse_locked_today"] = False
+                        state["is_mcx_locked_today"] = False
+                        state["session_cap_alerted"] = {"NSE_FO": False, "MCX_FO": False}
                         state["active_trade_id"] = None
                         state["active_position"] = None
                         if "current_wallet_balance" not in state:
@@ -129,38 +143,80 @@ class StateManager:
             return True
         return False
 
-    def is_trade_allowed_today(self, override_daily_limit: bool = False) -> bool:
+    def is_trade_allowed_today(self, exchange: str = "NSE_FO", override_daily_limit: bool = False) -> bool:
+        """
+        ENFORCE DYNAMIC SESSION GATES:
+        - Before executing an NSE breakout trade: Verify NSE_FO_trades_today < 1 & not is_nse_locked_today.
+        - Before executing an MCX Crude Oil trade: Verify MCX_FO_trades_today < 1 & not is_mcx_locked_today.
+        """
         self._check_date_reset()
         if self.is_drawdown_limit_exceeded():
             return False
+
         if override_daily_limit:
-            print(f"[MANUAL OVERRIDE ACTIVE] Daily {MAX_DAILY_TRADES}-trade cap lockout manually bypassed for today ({self.state['date']}).")
+            print(f"[MANUAL OVERRIDE ACTIVE] Session trade cap lockout manually bypassed for {exchange} ({self.state['date']}).")
             return True
-        if self.state["trades_today_count"] >= MAX_DAILY_TRADES or self.state["is_locked_for_today"]:
-            print(f"[State Manager] Trade BLOCKED: Daily trade cap of {MAX_DAILY_TRADES} trade per day reached for {self.state['date']}. (Use --override-daily-limit to bypass).")
+
+        segment = "MCX_FO" if ("MCX" in str(exchange).upper()) else "NSE_FO"
+        
+        if segment == "MCX_FO":
+            count = self.state.get("MCX_FO_trades_today", 0)
+            locked = self.state.get("is_mcx_locked_today", False)
+            session_name = "MCX Commodity (Evening Session)"
+        else:
+            count = self.state.get("NSE_FO_trades_today", 0)
+            locked = self.state.get("is_nse_locked_today", False)
+            session_name = "NSE Equity (Morning Session)"
+
+        if count >= 1 or locked:
+            print(f"[State Manager] Trade BLOCKED: Max 1 trade cap reached for {session_name} on {self.state['date']}.")
+            
+            # Telegram Alerting for Session Cap Reached
+            cap_alerts = self.state.get("session_cap_alerted", {})
+            if not cap_alerts.get(segment, False):
+                try:
+                    from reporting.telegram_bot import send_telegram_message
+                    alert_msg = (
+                        f"🔒 <b>[SESSION CAP REACHED]</b>\n"
+                        f"========================================\n"
+                        f"Max 1 trade executed for <b>{session_name}</b>.\n"
+                        f"System locked for the rest of the session ({self.state['date']}).\n"
+                        f"========================================"
+                    )
+                    send_telegram_message(alert_msg)
+                    cap_alerts[segment] = True
+                    self.state["session_cap_alerted"] = cap_alerts
+                    self._save_state(self.state)
+                except Exception as alert_err:
+                    print(f"[State Manager Alert Notice] Could not send Telegram cap alert: {alert_err}")
+
             return False
+
         return True
 
     def get_current_wallet_balance(self) -> float:
         self._check_date_reset()
         return float(self.state.get("current_wallet_balance", INITIAL_WALLET_CAPITAL))
 
-    def record_entry_trade(self, option_contract: Dict[str, Any], entry_premium: float, target_p: float, stop_p: float, execution_mode: str = "DRY_RUN") -> int:
+    def record_entry_trade(self, option_contract: Dict[str, Any], entry_premium: float, target_p: float, stop_p: float, execution_mode: str = "DRY_RUN", exchange: str = "NSE_FO") -> int:
         self._check_date_reset()
         today_str = datetime.date.today().isoformat()
         now_str = datetime.datetime.now().strftime("%H:%M:%S")
         
+        ex_segment = "MCX_FO" if ("MCX" in str(exchange).upper() or option_contract.get("is_mcx") or option_contract.get("underlying_symbol") == "CRUDEOIL") else "NSE_FO"
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO trades (
-                trade_date, entry_time, execution_mode, underlying_symbol, option_symbol, option_type,
+                trade_date, entry_time, execution_mode, exchange, underlying_symbol, option_symbol, option_type,
                 strike_price, quantity, entry_premium, target_price, stop_price, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             today_str,
             now_str,
             execution_mode,
+            ex_segment,
             option_contract["underlying_symbol"],
             option_contract["option_symbol"],
             option_contract["option_type"],
@@ -175,12 +231,16 @@ class StateManager:
         conn.commit()
         conn.close()
 
-        self.state["trades_today_count"] += 1
-        self.state["is_locked_for_today"] = True  # HARD LOCK AFTER 1 TRADE
+        if ex_segment == "MCX_FO":
+            self.state["MCX_FO_trades_today"] = self.state.get("MCX_FO_trades_today", 0) + 1
+        else:
+            self.state["NSE_FO_trades_today"] = self.state.get("NSE_FO_trades_today", 0) + 1
+
         self.state["active_trade_id"] = trade_id
         self.state["active_position"] = {
             "trade_id": trade_id,
             "execution_mode": execution_mode,
+            "exchange": ex_segment,
             "option_symbol": option_contract["option_symbol"],
             "quantity": option_contract["lot_size"],
             "entry_premium": entry_premium,
@@ -188,7 +248,7 @@ class StateManager:
             "stop_price": stop_p
         }
         self._save_state(self.state)
-        print(f"[State Manager] Trade #{trade_id} ({execution_mode}) recorded. DAILY LOCK ACTIVATED (MAX 1 TRADE PER DAY ENFORCED).")
+        print(f"[State Manager] Trade #{trade_id} ({execution_mode} / {ex_segment}) recorded. SESSION LOCK ACTIVATED.")
         return trade_id
 
     def record_exit_trade(self, trade_id: int, exit_premium: float, friction_fees: float = 0.0, exit_reason: str = "EXIT"):
@@ -197,11 +257,12 @@ class StateManager:
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT quantity, entry_premium, execution_mode FROM trades WHERE id = ?", (trade_id,))
+        cursor.execute("SELECT quantity, entry_premium, execution_mode, exchange FROM trades WHERE id = ?", (trade_id,))
         row = cursor.fetchone()
         
+        ex_segment = "NSE_FO"
         if row:
-            quantity, entry_premium, mode = row
+            quantity, entry_premium, mode, ex_segment = row
             from reporting.friction_calculator import calculate_trade_friction
             f_res = calculate_trade_friction(quantity, entry_premium, exit_premium)
             gross_pnl = f_res["gross_pnl"]
@@ -220,16 +281,46 @@ class StateManager:
             new_wallet = max(0.0, round(prev_wallet + net_pnl, 2))
             self.state["current_wallet_balance"] = new_wallet
             
-            print(f"[State Manager] Trade #{trade_id} ({mode}) CLOSED. Exit Premium: Rs {exit_premium:.2f} | Net PnL: Rs {net_pnl:,.2f} INR | Updated Real-Time Wallet: Rs {new_wallet:,.2f} INR")
+            print(f"[State Manager] Trade #{trade_id} ({mode} / {ex_segment}) CLOSED. Exit Premium: Rs {exit_premium:.2f} | Net PnL: Rs {net_pnl:,.2f} INR | Updated Real-Time Wallet: Rs {new_wallet:,.2f} INR")
             
         conn.close()
+
+        # Lock out new entries for that segment until the next calendar day
+        if "MCX" in str(ex_segment).upper():
+            self.state["is_mcx_locked_today"] = True
+            session_label = "MCX Commodity (Evening Session)"
+        else:
+            self.state["is_nse_locked_today"] = True
+            session_label = "NSE Equity (Morning Session)"
+
         self.state["active_trade_id"] = None
         self.state["active_position"] = None
         self._save_state(self.state)
 
-    def get_trades_today_count(self) -> int:
+        # Trigger Telegram alert for session cap reached
+        try:
+            from reporting.telegram_bot import send_telegram_message
+            cap_alerts = self.state.get("session_cap_alerted", {})
+            cap_key = "MCX_FO" if "MCX" in str(ex_segment).upper() else "NSE_FO"
+            if not cap_alerts.get(cap_key, False):
+                alert_msg = (
+                    f"🔒 <b>[SESSION CAP REACHED]</b>\n"
+                    f"========================================\n"
+                    f"Max 1 trade executed for <b>{session_label}</b>.\n"
+                    f"System locked for the rest of the session ({self.state['date']}).\n"
+                    f"========================================"
+                )
+                send_telegram_message(alert_msg)
+                cap_alerts[cap_key] = True
+                self.state["session_cap_alerted"] = cap_alerts
+                self._save_state(self.state)
+        except Exception as alert_err:
+            print(f"[State Manager Exit Alert Notice] {alert_err}")
+
+    def get_trades_today_count(self, exchange: str = "NSE_FO") -> int:
         self._check_date_reset()
-        return self.state.get("trades_today_count", 0)
+        segment = "MCX_FO" if ("MCX" in str(exchange).upper()) else "NSE_FO"
+        return self.state.get(f"{segment}_trades_today", 0)
 
     def get_last_trade_pnl(self) -> float:
         conn = sqlite3.connect(self.db_path)
@@ -259,10 +350,15 @@ class StateManager:
 
     def _check_date_reset(self):
         today_str = datetime.date.today().isoformat()
-        if self.state.get("date") != today_str:
+        if self.state.get("date") != today_str or self.state.get("last_reset_date") != today_str:
+            print(f"[State Manager Midnight Reset] Date reset triggered for {today_str}.")
             self.state["date"] = today_str
-            self.state["trades_today_count"] = 0
-            self.state["is_locked_for_today"] = False
+            self.state["last_reset_date"] = today_str
+            self.state["NSE_FO_trades_today"] = 0
+            self.state["MCX_FO_trades_today"] = 0
+            self.state["is_nse_locked_today"] = False
+            self.state["is_mcx_locked_today"] = False
+            self.state["session_cap_alerted"] = {"NSE_FO": False, "MCX_FO": False}
             self.state["active_trade_id"] = None
             self.state["active_position"] = None
             self._save_state(self.state)
