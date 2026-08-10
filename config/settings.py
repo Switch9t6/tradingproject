@@ -1,8 +1,8 @@
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file (override stale shell vars)
+load_dotenv(override=True)
 
 # Upstox API Credentials & Authentication Settings
 UPSTOX_API_KEY = os.getenv("UPSTOX_API_KEY", "")
