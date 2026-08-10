@@ -417,9 +417,30 @@ def _register_handlers(bot):
         except Exception as e:
             bot.reply_to(message, f"[ERROR] Could not fetch trades: {e}")
 
+    _processed_callback_ids = set()
+
     # Callback Query Handler for Interactive Inline Buttons
     @bot.callback_query_handler(func=lambda call: True)
     def handle_callback_query(call):
+        # 1. Immediately answer callback query to prevent Telegram server retries/loops
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
+
+        # 2. Debounce callback queries by ID to prevent duplicate executions
+        call_id = str(getattr(call, "id", ""))
+        if call_id and call_id in _processed_callback_ids:
+            return
+        if call_id:
+            _processed_callback_ids.add(call_id)
+            if len(_processed_callback_ids) > 100:
+                try:
+                    _processed_callback_ids.pop()
+                except Exception:
+                    pass
+
+        # 3. Route callback action
         if call.data.startswith("approve_"):
             trade_id = call.data.split("approve_")[1]
             if trade_id in _pending_approvals:
@@ -440,11 +461,6 @@ def _register_handlers(bot):
             cmd_stop(call.message)
         elif call.data == "cb_resume":
             cmd_resume(call.message)
-            
-        try:
-            bot.answer_callback_query(call.id)
-        except Exception:
-            pass
 
 
 def is_bot_disabled() -> bool:
