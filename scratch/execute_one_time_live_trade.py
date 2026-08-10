@@ -108,6 +108,17 @@ def execute_live_trade_now():
         print(f"   Status  : SUCCESS")
         print(f"==========================================================================")
 
+        # Sync StateManager and record executed trade in SQLite database
+        sm = StateManager()
+        sm.record_entry_trade({
+            "underlying_symbol": "NIFTY",
+            "option_symbol": "NIFTY_24900_CE_11_AUG_26",
+            "option_type": "CE",
+            "strike_price": 24900.0,
+            "instrument_key": "NSE_FO|41031",
+            "lot_size": lot_size
+        }, entry_premium=ask_price, target_p=target_price, stop_p=stop_price, execution_mode="LIVE")
+
         # Poll Order Status for 3 seconds
         time.sleep(2.0)
         try:
