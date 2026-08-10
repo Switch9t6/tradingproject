@@ -181,17 +181,45 @@ if __name__ == "__main__":
         auto_approve=args.auto_approve
     )
 
-    # 3. Railway / Cloud 24/7 Server Daemon Loop
+    # 3. Railway / Cloud 24/7 Server Daemon Loop with Continuous 5-Min Market Scanner
     # Detects Railway deployment automatically or if --daemon flag is set
-    is_cloud_env = args.daemon or bool(os.getenv("RAILWAY_ENVIRONMENT")) or bool(os.getenv("RAILWAY_PROJECT_ID")) or bool(os.getenv("PORT"))
+    is_cloud_env = args.daemon or bool(os.path.exists("/data")) or bool(os.getenv("RAILWAY_ENVIRONMENT")) or bool(os.getenv("RAILWAY_PROJECT_ID")) or bool(os.getenv("PORT"))
     if is_cloud_env:
         print("\n" + "=" * 80)
-        print("  [CLOUD DAEMON ACTIVE] Engine running in 24/7 background worker mode on Railway.")
-        print("  [TELEGRAM CONTROL] Polling listener stays ONLINE 24/7 for /status, /report, /trades, /stop, /resume.")
+        print("  [CLOUD DAEMON ACTIVE] Engine running in 24/7 continuous market scanner mode on Railway.")
+        print("  [MARKET SCANNER SCHEDULE] Auto-scans every 5 minutes during NSE trading windows (09:30-11:15 AM & 13:30-14:30 PM IST).")
+        print("  [TELEGRAM CONTROL] Polling listener stays ONLINE 24/7 for /start, /status, /report, /trades, /stop, /resume.")
         print("=" * 80)
         try:
+            last_scan_minute = -1
             while True:
-                time.sleep(30)
+                time.sleep(15)
+                try:
+                    from execution.telegram_control import get_ist_now, is_bot_disabled
+                    from execution.state_manager import StateManager
+
+                    now_ist = get_ist_now()
+                    current_time = now_ist.time()
+                    minute = now_ist.minute
+                    weekday = now_ist.weekday() # 0 = Mon, 4 = Fri
+
+                    if weekday < 5:
+                        in_w1 = (datetime.time(9, 30) <= current_time <= datetime.time(11, 15))
+                        in_w2 = (datetime.time(13, 30) <= current_time <= datetime.time(14, 30))
+
+                        if (in_w1 or in_w2) and (minute % 5 == 0) and (minute != last_scan_minute):
+                            sm = StateManager()
+                            if sm.is_trade_allowed_today(override_daily_limit=args.override_daily_limit) and not is_bot_disabled():
+                                last_scan_minute = minute
+                                print(f"\n⏰ [5-MIN SCAN TRIGGER] Auto-scanning market at {now_ist.strftime('%H:%M:%S')} IST...")
+                                run_daily_pipeline(
+                                    reset_state=False,
+                                    micro_capital=args.micro_capital,
+                                    override_daily_limit=args.override_daily_limit,
+                                    auto_approve=args.auto_approve
+                                )
+                except Exception as loop_err:
+                    print(f"[Daemon Loop Warning] {loop_err}")
         except KeyboardInterrupt:
             print("\n[Cloud Daemon] Stopping worker process...")
 
