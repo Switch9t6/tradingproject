@@ -374,7 +374,7 @@ if __name__ == "__main__":
                     # Session 1: NSE Options Window
                     if (datetime.time(9, 30) <= c_time <= datetime.time(11, 15)) or (datetime.time(13, 30) <= c_time <= datetime.time(14, 30)):
                         print(f"[{c_time.strftime('%H:%M:%S')} IST] [DAEMON] Triggering Session 1 NSE Market Scan...")
-                        run_daily_pipeline(session="nse", auto_approve=True, dry_run=is_dry_run)
+                        run_daily_pipeline(session="nse", auto_approve=True, micro_capital=args.micro_capital, dry_run=is_dry_run)
                         
                     # Session 1 Hard Square-Off
                     elif datetime.time(15, 15) <= c_time <= datetime.time(15, 20):
@@ -383,7 +383,7 @@ if __name__ == "__main__":
                     # Session 2: MCX Crude Oil Options Window
                     if datetime.time(17, 0) <= c_time <= datetime.time(23, 0):
                         print(f"[{c_time.strftime('%H:%M:%S')} IST] [DAEMON] Triggering Session 2 MCX Crude Oil Market Scan...")
-                        run_daily_pipeline(session="mcx", auto_approve=True, dry_run=is_dry_run)
+                        run_daily_pipeline(session="mcx", auto_approve=True, micro_capital=args.micro_capital, dry_run=is_dry_run)
 
                     # Session 2 Hard Square-Off
                     elif datetime.time(23, 0) <= c_time <= datetime.time(23, 10):

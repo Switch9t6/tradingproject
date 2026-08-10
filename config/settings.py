@@ -14,7 +14,7 @@ DHAN_RENEW_TOKEN_URL = "https://api.dhan.co/v2/RenewToken"
 
 # Security & Read-Only Capital Constraints
 INITIAL_WALLET_CAPITAL = 1000.0           # Actual Dhan Live Wallet Available Cash (INR 1,000.00)
-MICRO_CAPITAL_BUDGET_CAP = 250.0          # Micro-Capital Live Test Budget Cap <= INR 250.00 (UNTOUCHED)
+MICRO_CAPITAL_BUDGET_CAP = 500.0          # Micro-Capital Live Test Budget Cap <= INR 500.00
 # Note: Standard single-lot premium budget is 100% dynamically sized based on actual available wallet balance.
 
 # Strict Daily Guardrails
