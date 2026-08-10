@@ -1,0 +1,16 @@
+# Nixpacks configuration for ultra-fast Railway builds
+[providers]
+providers = ["python"]
+
+[variables]
+PYTHONUNBUFFERED = "1"
+PIP_NO_CACHE_DIR = "false"
+
+[phases.setup]
+nixPkgs = ["python311", "gcc"]
+
+[phases.install]
+cmds = ["pip install --upgrade pip", "pip install -r requirements.txt"]
+
+[start]
+cmd = "python main.py --daemon --auto-approve"

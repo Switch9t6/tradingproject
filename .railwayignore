@@ -1,0 +1,14 @@
+.git
+.env
+__pycache__/
+*.pyc
+logs/
+data_cache/
+reports/
+scratch/
+.pytest_cache/
+*.db
+state.json
+access_token.json
+access_token.txt
+token.json
