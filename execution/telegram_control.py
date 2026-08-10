@@ -78,6 +78,25 @@ def _build_action_keyboard(telebot_module):
     return markup
 
 
+APPROVAL_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "pending_approvals.json")
+
+def _read_approval_store() -> Dict[str, Any]:
+    if os.path.exists(APPROVAL_FILE):
+        try:
+            with open(APPROVAL_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def _write_approval_store(store: Dict[str, Any]):
+    try:
+        os.makedirs(os.path.dirname(APPROVAL_FILE), exist_ok=True)
+        with open(APPROVAL_FILE, "w") as f:
+            json.dump(store, f, indent=2)
+    except Exception as e:
+        _safe_print(f"[Approval Store Write Error] {e}")
+
 def request_telegram_trade_approval(
     option_symbol: str,
     lot_size: int,
@@ -100,8 +119,14 @@ def request_telegram_trade_approval(
     import telebot
 
     trade_id = str(uuid.uuid4())[:8]
-    event = threading.Event()
-    _pending_approvals[trade_id] = {"event": event, "approved": False}
+    store = _read_approval_store()
+    store[trade_id] = {
+        "status": "PENDING",
+        "option_symbol": option_symbol,
+        "total_cost": total_cost,
+        "created_at": time.time()
+    }
+    _write_approval_store(store)
 
     msg_text = (
         "⚠️ [INTERACTIVE ORDER APPROVAL REQUIRED]\n"
@@ -126,14 +151,27 @@ def request_telegram_trade_approval(
         _safe_print(f"[Telegram Control] Sent interactive order approval prompt to Telegram (ID: {trade_id}). Waiting {timeout_seconds}s...")
     except Exception as e:
         _safe_print(f"[Telegram Control Error] Could not send approval prompt: {e}")
-        _pending_approvals.pop(trade_id, None)
+        st = _read_approval_store()
+        st.pop(trade_id, None)
+        _write_approval_store(st)
         return False
 
-    # Wait up to timeout_seconds for user to tap [Approve] or [Reject]
-    is_set = event.wait(timeout=timeout_seconds)
+    start_wait = time.time()
+    is_approved = False
+    is_set = False
 
-    approval_record = _pending_approvals.pop(trade_id, None)
-    is_approved = approval_record["approved"] if (approval_record and is_set) else False
+    while time.time() - start_wait < timeout_seconds:
+        time.sleep(0.5)
+        st = _read_approval_store().get(trade_id, {})
+        status = st.get("status")
+        if status in ["APPROVED", "REJECTED"]:
+            is_set = True
+            is_approved = (status == "APPROVED")
+            break
+
+    st_final = _read_approval_store()
+    st_final.pop(trade_id, None)
+    _write_approval_store(st_final)
 
     try:
         if is_approved:
@@ -537,11 +575,21 @@ def _register_handlers(bot):
         # 3. Route callback action
         if call.data.startswith("approve_"):
             trade_id = call.data.split("approve_")[1]
+            store = _read_approval_store()
+            if trade_id in store:
+                store[trade_id]["status"] = "APPROVED"
+                _write_approval_store(store)
+                _safe_print(f"[Telegram Control] Trade ID {trade_id} APPROVED via Telegram inline button.")
             if trade_id in _pending_approvals:
                 _pending_approvals[trade_id]["approved"] = True
                 _pending_approvals[trade_id]["event"].set()
         elif call.data.startswith("reject_"):
             trade_id = call.data.split("reject_")[1]
+            store = _read_approval_store()
+            if trade_id in store:
+                store[trade_id]["status"] = "REJECTED"
+                _write_approval_store(store)
+                _safe_print(f"[Telegram Control] Trade ID {trade_id} REJECTED via Telegram inline button.")
             if trade_id in _pending_approvals:
                 _pending_approvals[trade_id]["approved"] = False
                 _pending_approvals[trade_id]["event"].set()
