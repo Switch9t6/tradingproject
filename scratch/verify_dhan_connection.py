@@ -50,7 +50,7 @@ try:
     print(f"3. PORTFOLIO POSITIONS  : [STATUS: {str(status_pos).upper()}] ({pos_count} active open positions)")
 
     # 4. Market Data Quote API
-    quote_resp = dhan.quote_data(security_id="573917", exchange_segment="MCX_COMM", instrument_type="OPTFUT")
+    quote_resp = dhan.quote_data(securities={"MCX_COMM": ["573917"]})
     status_quote = quote_resp.get("status", "success") if isinstance(quote_resp, dict) else "success"
     print(f"4. MARKET DATA FEED API : [STATUS: {str(status_quote).upper()}] (Dhan Quote Engine Verified)")
 
