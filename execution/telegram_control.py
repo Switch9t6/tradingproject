@@ -142,7 +142,7 @@ def request_telegram_trade_approval(
         f"Target (+25%)  : Rs {target_price:.2f}\n"
         f"Stop Loss (-12%): Rs {stop_price:.2f}\n"
         "========================================\n"
-        "Do you authorize placing this real order on Upstox?"
+        "Do you authorize placing this real order on DhanHQ?"
     )
 
     markup = telebot.types.InlineKeyboardMarkup(row_width=2)
@@ -425,27 +425,57 @@ def _register_handlers(bot):
         is_paused = os.path.exists(BOT_DISABLED_FLAG)
         engine_state = "PAUSED (Kill Switch Active)" if is_paused else ("ONLINE & SCANNING" if (nse_active or mcx_active) else "STANDBY")
 
-        # Attempt to fetch live wallet balance
-        wallet_str = "Rs 1,258.00 INR"
+        # Fetch live wallet balance directly from Dhan API
+        wallet_str = "Rs 1,000.00 INR"
         try:
-            from execution.state_manager import StateManager
-            sm = StateManager()
-            wallet_val = sm.get_current_wallet_balance()
-            if wallet_val == 10000.0 or wallet_val == 257.48 or wallet_val <= 0:
-                wallet_val = 1258.0
-                sm.state["current_wallet_balance"] = 1258.0
+            from dhanhq import dhanhq, DhanContext
+            from config.settings import DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN, TOKEN_FILE_PATH
+            client_id = DHAN_CLIENT_ID or os.getenv("DHAN_CLIENT_ID", "")
+            token = DHAN_ACCESS_TOKEN or os.getenv("DHAN_ACCESS_TOKEN", "")
+            token_file = TOKEN_FILE_PATH if os.path.exists(TOKEN_FILE_PATH) else "access_token.json"
+            if (not token or token.startswith("MOCK")) and os.path.exists(token_file):
+                with open(token_file, "r") as f:
+                    tdata = json.load(f)
+                    token = tdata.get("access_token", token)
+                    client_id = tdata.get("client_id", client_id)
+            if token and not token.startswith("MOCK"):
+                ctx = DhanContext(client_id, token)
+                dhan = dhanhq(ctx)
+                res = dhan.get_fund_limits()
+                data = res.get("data", {}) if isinstance(res, dict) else {}
+                avail = float(data.get("availabelBalance") or data.get("availableBalance") or 0.0)
+                wallet_str = f"Rs {avail:,.2f} INR"
+                # Sync state.json
+                from execution.state_manager import StateManager
+                sm = StateManager()
+                sm.state["current_wallet_balance"] = avail
                 sm._save_state(sm.state)
-            wallet_str = f"Rs {wallet_val:,.2f} INR"
         except Exception:
             pass
 
-        # Fetch today's trade count
+        # Fetch today's trade count from DhanHQ order book
         trade_count = "0"
         try:
-            from execution.state_manager import StateManager
-            sm = StateManager()
-            trades = sm.get_todays_trades()
-            trade_count = str(len(trades))
+            from dhanhq import dhanhq, DhanContext
+            from config.settings import DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN, TOKEN_FILE_PATH
+            client_id = DHAN_CLIENT_ID or os.getenv("DHAN_CLIENT_ID", "")
+            token = DHAN_ACCESS_TOKEN or os.getenv("DHAN_ACCESS_TOKEN", "")
+            token_file = TOKEN_FILE_PATH if os.path.exists(TOKEN_FILE_PATH) else "access_token.json"
+            if (not token or token.startswith("MOCK")) and os.path.exists(token_file):
+                with open(token_file, "r") as f:
+                    tdata = json.load(f)
+                    token = tdata.get("access_token", token)
+                    client_id = tdata.get("client_id", client_id)
+            if token and not token.startswith("MOCK"):
+                ctx = DhanContext(client_id, token)
+                dhan = dhanhq(ctx)
+                res = dhan.get_order_list()
+                orders = res.get("data", []) if isinstance(res, dict) else []
+                today_str = datetime.datetime.now(IST_TZ).date().isoformat()
+                filled_today = [o for o in orders if isinstance(o, dict)
+                                and str(o.get("orderStatus", "")).upper() in ("TRADED", "FILLED", "SUCCESS", "EXECUTED")
+                                and today_str in str(o.get("createTime", ""))]
+                trade_count = str(len(filled_today))
         except Exception:
             pass
 
@@ -506,73 +536,91 @@ def _register_handlers(bot):
     def cmd_trades(message):
         # /trades works ANYTIME (both when market is open and closed)
         try:
-            from execution.state_manager import StateManager
-            sm = StateManager()
-            trades = sm.get_todays_trades()
+            from dhanhq import dhanhq, DhanContext
+            from config.settings import DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN, TOKEN_FILE_PATH
 
-            # Upstox API Live Order Book Fallback if local DB is empty
-            if not trades:
+            client_id = DHAN_CLIENT_ID or os.getenv("DHAN_CLIENT_ID", "")
+            token = DHAN_ACCESS_TOKEN or os.getenv("DHAN_ACCESS_TOKEN", "")
+            token_file = TOKEN_FILE_PATH if os.path.exists(TOKEN_FILE_PATH) else "access_token.json"
+            if (not token or token.startswith("MOCK")) and os.path.exists(token_file):
+                with open(token_file, "r") as f:
+                    tdata = json.load(f)
+                    token = tdata.get("access_token", token)
+                    client_id = tdata.get("client_id", client_id)
+
+            today_str = datetime.datetime.now(IST_TZ).date().isoformat()
+
+            # --- Primary: DhanHQ Live Order Book ---
+            dhan_trades = []
+            if token and not token.startswith("MOCK"):
                 try:
-                    import json, upstox_client
-                    from config.settings import TOKEN_FILE_PATH
-                    token_file = TOKEN_FILE_PATH if os.path.exists(TOKEN_FILE_PATH) else "access_token.json"
-                    if os.path.exists(token_file):
-                        with open(token_file, "r") as f:
-                            token = json.load(f).get("access_token", "")
-                        if token and not token.startswith("MOCK"):
-                            config = upstox_client.Configuration()
-                            config.access_token = token
-                            order_api = upstox_client.OrderApi(upstox_client.ApiClient(config))
-                            res = order_api.get_order_book(api_version="2.0")
-                            book_data = getattr(res, "data", res)
-                            filled_orders = [
-                                o for o in (book_data if isinstance(book_data, list) else [])
-                                if str(getattr(o, "status", "") if not isinstance(o, dict) else o.get("status", "")).lower() == "complete"
-                            ]
-                            
-                            if filled_orders:
-                                lines = [f"[TODAY'S LIVE UPSTOX EXPUTED TRADES] ({len(filled_orders)} orders)\n========================================"]
-                                for o in filled_orders:
-                                    sym = getattr(o, "trading_symbol", None) or (o.get("trading_symbol") if isinstance(o, dict) else "N/A")
-                                    tx = getattr(o, "transaction_type", "BUY") if not isinstance(o, dict) else o.get("transaction_type", "BUY")
-                                    avg_p = float(getattr(o, "average_price", 0.0) if not isinstance(o, dict) else o.get("average_price", 0.0))
-                                    qty = int(getattr(o, "quantity", 0) if not isinstance(o, dict) else o.get("quantity", 0))
-                                    lines.append(f"• {tx} {sym} ({qty} shares) @ Rs {avg_p:.2f}")
-                                lines.append("========================================")
-                                bot.reply_to(message, "\n".join(lines), reply_markup=_build_action_keyboard(telebot))
-                                return
-                except Exception as api_err:
-                    _safe_print(f"[Trades Order Book Fallback Notice] {api_err}")
+                    ctx = DhanContext(client_id, token)
+                    dhan = dhanhq(ctx)
+                    res = dhan.get_order_list()
+                    orders = res.get("data", []) if isinstance(res, dict) else []
+                    dhan_trades = [
+                        o for o in orders
+                        if isinstance(o, dict)
+                        and str(o.get("orderStatus", "")).upper() in ("TRADED", "FILLED", "SUCCESS", "EXECUTED")
+                        and today_str in str(o.get("createTime", ""))
+                    ]
+                except Exception as dhan_err:
+                    _safe_print(f"[Trades Dhan API Notice] {dhan_err}")
 
-            if not trades:
-                bot.reply_to(message, "[TRADES] No live trades executed today.", reply_markup=_build_action_keyboard(telebot))
+            if dhan_trades:
+                lines = [f"[TODAY'S DHAN LIVE EXECUTED TRADES] ({len(dhan_trades)} orders)\n========================================"]
+                total_pnl = 0.0
+                for o in dhan_trades:
+                    sym = o.get("tradingSymbol", "N/A")
+                    tx = o.get("transactionType", "BUY")
+                    avg_p = float(o.get("price") or o.get("averageTradedPrice") or 0.0)
+                    qty = int(o.get("quantity") or 0)
+                    status = o.get("orderStatus", "TRADED")
+                    exch = o.get("exchangeSegment", "")
+                    t_str = str(o.get("createTime", ""))
+                    lines.append(f"• {tx} {sym} ({qty} qty) @ Rs {avg_p:.2f} [{status}] [{exch}] {t_str}")
+                lines.append("========================================")
+                bot.reply_to(message, "\n".join(lines), reply_markup=_build_action_keyboard(telebot))
                 return
 
-            lines = [f"[TODAY'S LIVE TRADE LOG] ({len(trades)} trades)\n========================================"]
-            total_pnl = 0.0
-            for i, t in enumerate(trades, 1):
-                symbol = t.get("option_contract", {}).get("option_symbol", "N/A")
-                entry = t.get("entry_premium", 0.0)
-                exit_p = t.get("exit_premium", 0.0)
-                pnl = t.get("net_pnl", 0.0)
-                reason = t.get("exit_reason", "OPEN")
-                total_pnl += pnl
-                lines.append(
-                    f"\nTrade #{i}: {symbol}\n"
-                    f"  Entry: Rs {entry:.2f} | Exit: Rs {exit_p:.2f}\n"
-                    f"  PnL: {'+' if pnl>=0 else ''}Rs {pnl:,.2f} | {reason}"
-                )
+            # --- Fallback: StateManager local trade log ---
+            try:
+                from execution.state_manager import StateManager
+                sm = StateManager()
+                local_trades = sm.get_todays_trades()
+                if local_trades:
+                    lines = [f"[TODAY'S LOCAL TRADE LOG] ({len(local_trades)} trades)\n========================================"]
+                    total_pnl = 0.0
+                    for i, t in enumerate(local_trades, 1):
+                        symbol = (
+                            t.get("option_symbol")
+                            or t.get("tradingSymbol")
+                            or (t.get("option_contract") or {}).get("option_symbol", "N/A")
+                        )
+                        entry = float(t.get("entry_premium") or 0.0)
+                        exit_p = float(t.get("exit_premium") or 0.0)
+                        pnl = float(t.get("net_pnl") or 0.0)
+                        reason = t.get("exit_reason", "OPEN")
+                        total_pnl += pnl
+                        lines.append(
+                            f"\nTrade #{i}: {symbol}\n"
+                            f"  Entry: Rs {entry:.2f} | Exit: Rs {exit_p:.2f}\n"
+                            f"  PnL: {'+' if pnl>=0 else ''}Rs {pnl:,.2f} | {reason}"
+                        )
+                    lines.append(f"\n========================================")
+                    lines.append(f"NET DAILY PnL: {'+' if total_pnl>=0 else ''}Rs {total_pnl:,.2f} INR")
+                    bot.reply_to(message, "\n".join(lines), reply_markup=_build_action_keyboard(telebot))
+                    return
+            except Exception:
+                pass
 
-            lines.append(f"\n========================================")
-            lines.append(f"NET DAILY PnL: {'+' if total_pnl>=0 else ''}Rs {total_pnl:,.2f} INR")
-
-            bot.reply_to(message, "\n".join(lines), reply_markup=_build_action_keyboard(telebot))
+            bot.reply_to(message, "[TRADES] No live trades executed today.", reply_markup=_build_action_keyboard(telebot))
         except Exception as e:
             bot.reply_to(message, f"[ERROR] Could not fetch trades: {e}")
 
     @bot.message_handler(commands=["squareoff", "close", "exit"])
     def cmd_squareoff(message):
-        bot.reply_to(message, "⏳ [SQUARE OFF] Requesting instant live position exit on Upstox...", reply_markup=_build_action_keyboard(telebot))
+        bot.reply_to(message, "[SQUARE OFF] Requesting instant live position exit on DhanHQ...", reply_markup=_build_action_keyboard(telebot))
         try:
             from main import execute_hard_eod_squareoff
             res = execute_hard_eod_squareoff(dry_run=False)
