@@ -45,10 +45,71 @@ def send_telegram_message(message_text: str) -> bool:
             return True
         else:
             _safe_print(f"[Telegram Warning] Failed to send alert (HTTP {response.status_code}): {response.text}")
-            return False
     except Exception as e:
         _safe_print(f"[Telegram Exception] Network error sending alert: {e}")
         return False
+
+
+_SENT_SIGNALS_CACHE = set()
+
+
+def send_signal_detected_alert(
+    symbol: str,
+    option_type: str,
+    score: float,
+    reason: str,
+    session: str = "Active Session",
+    is_manual_command: bool = False
+) -> bool:
+    """
+    Sends a 'Signal Detected' Telegram alert ONLY ONCE per signal per day during automated scanning.
+    If is_manual_command is True, it always sends the alert regardless of previous cache.
+    """
+    today_str = datetime.date.today().isoformat()
+    signal_key = f"{today_str}_{symbol}_{option_type}_{session}"
+
+    if not is_manual_command and signal_key in _SENT_SIGNALS_CACHE:
+        _safe_print(f"[Telegram Anti-Spam] Suppressed duplicate signal alert for {signal_key}.")
+        return False
+
+    alert_text = (
+        f"🎯 <b>[QUALIFIED TRADING SIGNAL DETECTED]</b>\n"
+        f"========================================\n"
+        f"<b>Symbol          :</b> <code>{symbol}</code> ({option_type} Option)\n"
+        f"<b>Trading Session :</b> {session}\n"
+        f"<b>Composite Score :</b> <b>{score:.1f} / 100 Pts</b>\n"
+        f"<b>Signal Reason   :</b> {reason}\n"
+        f"========================================"
+    )
+
+    sent = send_telegram_message(alert_text)
+    if sent:
+        _SENT_SIGNALS_CACHE.add(signal_key)
+    return sent
+
+
+def send_order_placed_alert(
+    option_symbol: str,
+    lot_size: int,
+    limit_price: float,
+    order_id: str,
+    execution_mode: str = "LIVE PRODUCTION"
+) -> bool:
+    """
+    Dispatches immediate order placement notification when order is sent to Dhan API.
+    """
+    msg = (
+        f"🚀 <b>[DHAN ORDER PLACED]</b>\n"
+        f"========================================\n"
+        f"<b>Contract Symbol :</b> <code>{option_symbol}</code>\n"
+        f"<b>Execution Mode  :</b> {execution_mode}\n"
+        f"<b>Order Quantity  :</b> {lot_size} shares (1 Lot)\n"
+        f"<b>Limit Premium   :</b> Rs {limit_price:.2f}\n"
+        f"<b>Dhan Order ID   :</b> <code>{order_id or 'PENDING'}</code>\n"
+        f"========================================\n"
+        f"<i>Verifying order fill status on Dhan API...</i>"
+    )
+    return send_telegram_message(msg)
 
 
 def send_trade_entry_alert(trade_data: Dict[str, Any], wallet_balance: float = 0.0) -> bool:

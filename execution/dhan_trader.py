@@ -319,6 +319,18 @@ class DhanTrader:
                 data = api_resp.get("data", api_resp) if isinstance(api_resp, dict) else api_resp
                 order_id = str(data.get("orderId", "") if isinstance(data, dict) else getattr(data, "orderId", ""))
                 print(f"[LIVE DHAN ORDER PLACED] Order ID: {order_id} | Response: {api_resp}")
+
+                try:
+                    from reporting.telegram_bot import send_order_placed_alert
+                    send_order_placed_alert(
+                        option_symbol=option_symbol,
+                        lot_size=lot_size,
+                        limit_price=limit_price,
+                        order_id=order_id,
+                        execution_mode="LIVE PRODUCTION" if not self.dry_run else "DRY RUN"
+                    )
+                except Exception as t_err:
+                    print(f"[Telegram Order Alert Error] {t_err}")
                 
                 # 5-Second Fill Verification Loop
                 filled = False

@@ -317,23 +317,21 @@ def scan_smart_opportunities(
     # Send Rich Telegram Alert if Qualified Candidate Discovered (Score >= 75)
     if candidate and candidate.get("composite_rating", {}).get("composite_score", 0) >= 75.0:
         try:
-            from reporting.telegram_bot import send_telegram_message
+            from reporting.telegram_bot import send_signal_detected_alert
             score = candidate["composite_rating"]["composite_score"]
             sym = candidate["symbol"]
             opt_type = candidate["option_type"]
             session_title = candidate.get("session", "Active Session")
             reason = candidate.get("breakout_reason", "Technical & Macro Factor Alignment")
-            
-            alert_text = (
-                f"🚀 <b>[SMART SCANNER SIGNAL DETECTED]</b>\n"
-                f"========================================\n"
-                f"<b>Symbol:</b> {sym} ({opt_type} Option)\n"
-                f"<b>Session:</b> {session_title}\n"
-                f"<b>Composite Score:</b> {score:.1f} / 100 Pts\n"
-                f"<b>Breakout Reason:</b> {reason}\n"
-                f"========================================"
+
+            send_signal_detected_alert(
+                symbol=sym,
+                option_type=opt_type,
+                score=score,
+                reason=reason,
+                session=session_title,
+                is_manual_command=False
             )
-            send_telegram_message(alert_text)
         except Exception as alert_err:
             print(f"[Smart Scanner Alert Notice] Could not send Telegram signal alert: {alert_err}")
 
