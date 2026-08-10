@@ -357,8 +357,8 @@ if __name__ == "__main__":
     parser.add_argument("--daemon", action="store_true", help="Run in continuous 24/7 cloud daemon mode for Railway deployment")
     args = parser.parse_args()
 
-    session_target = "mcx" if args.crude_only else args.session
-    is_dry_run = args.dry_run or (not args.live)
+    is_cloud_env = args.daemon or bool(os.path.exists("/data")) or bool(os.getenv("RAILWAY_ENVIRONMENT")) or bool(os.getenv("RAILWAY_PROJECT_ID")) or bool(os.getenv("PORT"))
+    is_dry_run = args.dry_run or (not args.live and not is_cloud_env)
     
     # 1. Start Non-Blocking Telegram Control Listener
     start_telegram_listener_background()
@@ -374,7 +374,6 @@ if __name__ == "__main__":
     )
 
     # 3. Railway / Cloud 24/7 Server Daemon Loop with Dual-Session Continuous Scanner
-    is_cloud_env = args.daemon or bool(os.path.exists("/data")) or bool(os.getenv("RAILWAY_ENVIRONMENT")) or bool(os.getenv("RAILWAY_PROJECT_ID")) or bool(os.getenv("PORT"))
     if is_cloud_env:
         print("\n" + "=" * 80)
         print("  [CLOUD DAEMON DUAL-SESSION ACTIVE] Engine running 24/7 continuous market scanner on Railway.")
@@ -427,7 +426,8 @@ if __name__ == "__main__":
                                     micro_capital=args.micro_capital,
                                     override_daily_limit=args.override_daily_limit,
                                     auto_approve=args.auto_approve,
-                                    session=target_session
+                                    session=target_session,
+                                    dry_run=is_dry_run
                                 )
                 except Exception as loop_err:
                     import traceback
