@@ -356,7 +356,7 @@ if __name__ == "__main__":
     parser.add_argument("--reset-state", action="store_true", help="Force reset daily state lock for a fresh session run")
     parser.add_argument("--daemon", action="store_true", help="Run in continuous 24/7 cloud daemon mode for Railway deployment")
     args = parser.parse_args()
-
+    session_target = "mcx" if args.crude_only else args.session
     is_cloud_env = args.daemon or bool(os.path.exists("/data")) or bool(os.getenv("RAILWAY_ENVIRONMENT")) or bool(os.getenv("RAILWAY_PROJECT_ID")) or bool(os.getenv("PORT"))
     is_dry_run = args.dry_run or (not args.live and not is_cloud_env)
     
