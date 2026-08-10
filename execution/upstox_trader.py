@@ -211,10 +211,10 @@ class UpstoxOptionsTrader:
                     approved = True
                 
             if not approved:
-                print("\n⛔ [USER DECISION] Order placement REJECTED or TIMED OUT. Trade execution aborted.")
+                print("\n[USER DECISION] Order placement REJECTED or TIMED OUT. Trade execution aborted.")
                 return None
             else:
-                print("\n✅ [USER APPROVED] Trade execution authorized. Proceeding with order placement...\n")
+                print("\n[USER APPROVED] Trade execution authorized. Proceeding with order placement...\n")
 
         # 3. Place Aggressive Limit Order & Attach 5-Second Fill Verification Loop
         if not self.dry_run:
