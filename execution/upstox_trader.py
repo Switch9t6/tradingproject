@@ -123,7 +123,7 @@ class UpstoxOptionsTrader:
         # Check if consecutive loss scaling applies
         if self.state_mgr.get_last_trade_pnl() < 0 and available_cash == INITIAL_WALLET_CAPITAL:
             dynamic_budget = round(dynamic_budget * CONSECUTIVE_LOSS_SCALING_PCT, 2)
-            print(f"📉 [Capital Scaling Active] Previous trade was a loss. Scaled lot budget down to Rs {dynamic_budget:,.2f} INR.")
+            print(f"  [Capital Scaling Active] Previous trade was a loss. Scaled lot budget down to Rs {dynamic_budget:,.2f} INR.")
 
         print(f"[Real-Time Sizing] Available Cash: Rs {available_cash:,.2f} INR | Dynamic Trade Budget Cap: Rs {dynamic_budget:,.2f} INR.")
 
@@ -213,7 +213,11 @@ class UpstoxOptionsTrader:
                     is_amo=False
                 )
                 api_resp = self.order_api.place_order(body, api_version="2.0")
-                order_id = getattr(api_resp, "order_id", getattr(api_resp, "data", {}).get("order_id", ""))
+                data = getattr(api_resp, "data", api_resp)
+                if isinstance(data, dict):
+                    order_id = str(data.get("order_id", ""))
+                else:
+                    order_id = str(getattr(data, "order_id", getattr(api_resp, "order_id", "")))
                 print(f"[LIVE LIMIT ORDER PLACED] Order ID: {order_id} | Response: {api_resp}")
                 
                 # 5-Second Fill Verification Loop (polling status every 1 second for up to 5 seconds)
@@ -227,18 +231,18 @@ class UpstoxOptionsTrader:
                             ord_status = str(data.get("status", "") if isinstance(data, dict) else getattr(data, "status", "")).lower()
                             if ord_status in ["complete", "filled"]:
                                 filled = True
-                                print(f"✅ [ORDER FILLED] Order {order_id} filled within {sec}s (Status: {ord_status}).")
+                                print(f"  [ORDER FILLED] Order {order_id} filled within {sec}s (Status: {ord_status}).")
                                 break
                         except Exception as err:
                             print(f"[Fill Verification Sec {sec}] Status check: {err}")
 
                 if not filled and order_id:
-                    print(f"⚠️ [5-Sec Fill Timeout] Order {order_id} remains UNFILLED after 5 seconds. Dispatching API cancel_order()...")
+                    print(f"[5-Sec Fill Timeout] Order {order_id} remains UNFILLED after 5 seconds. Dispatching API cancel_order()...")
                     try:
                         self.order_api.cancel_order(order_id=order_id, api_version="2.0")
-                        print(f"🛑 [ORDER CANCELLED] Order {order_id} successfully cancelled. Preventing chasing overextended options.")
+                        print(f"  [ORDER CANCELLED] Order {order_id} successfully cancelled. Preventing chasing overextended options.")
                     except Exception as cancel_err:
-                        print(f"⚠️ [Cancel Order Error] Could not cancel order {order_id}: {cancel_err}")
+                        print(f"  [Cancel Order Error] Could not cancel order {order_id}: {cancel_err}")
                     return None
             except Exception as e:
                 print(f"[LIVE ORDER ERROR] Failed to place order: {e}")

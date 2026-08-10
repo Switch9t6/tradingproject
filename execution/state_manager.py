@@ -125,7 +125,7 @@ class StateManager:
         max_allowed_loss = -1.0 * (wallet * (max_drawdown_pct / 100.0))
         
         if net_daily_pnl < max_allowed_loss:
-            print(f"🛑 [CIRCUIT BREAKER ACTIVATED] Daily Net PnL (Rs {net_daily_pnl:,.2f}) breached -{max_drawdown_pct}% max drawdown limit. All trading halted for today.")
+            print(f"  [CIRCUIT BREAKER ACTIVATED] Daily Net PnL (Rs {net_daily_pnl:,.2f}) breached -{max_drawdown_pct}% max drawdown limit. All trading halted for today.")
             return True
         return False
 

@@ -186,13 +186,13 @@ def exchange_code_for_token(code: str, client_id: str, client_secret: str) -> di
                 json.dump(token_info, f, indent=4)
             with open("access_token.txt", "w") as f:
                 f.write(access_token or "")
-            print("\n🎉 [OAuth] Daily Access Token Generated & Saved Successfully!")
+            print("\n[OAuth SUCCESS] Daily Access Token Generated & Saved Successfully!")
             return token_info
         else:
-            print(f"\n❌ [OAuth Error] Token exchange failed ({response.status_code}): {response.text}")
+            print(f"\n[OAuth Error] Token exchange failed ({response.status_code}): {response.text}")
             return {}
     except Exception as e:
-        print(f"\n❌ [OAuth Exception] Error during token exchange: {e}")
+        print(f"\n[OAuth Exception] Error during token exchange: {e}")
         return {}
 
 def run_oauth_flow(dry_run: bool = False, force_refresh: bool = False) -> str:
@@ -270,12 +270,12 @@ def run_oauth_flow(dry_run: bool = False, force_refresh: bool = False) -> str:
                 token_info = exchange_code_for_token(captured_code, client_id, client_secret)
                 return token_info.get("access_token", "")
             else:
-                print("❌ [OAuth] OAuth flow failed or was cancelled.")
+                print("[OAuth] OAuth flow failed or was cancelled.")
                 return ""
     except Exception as e:
-        print(f"❌ [OAuth Server Error] Failed to bind to port {OAUTH_PORT}: {e}")
+        print(f"[OAuth Server Error] Failed to bind to port {OAUTH_PORT}: {e}")
         return ""
 
 if __name__ == "__main__":
-    token = run_oauth_flow(dry_run=True, force_refresh=True)
-    print("Test Token:", token)
+    token = run_oauth_flow(dry_run=False, force_refresh=True)
+    print("Live Token Acquired:", token[:10] + "..." if token else "Failed")
