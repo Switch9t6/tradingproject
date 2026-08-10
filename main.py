@@ -11,6 +11,7 @@ from scanner.news_filter import can_trade_during_news_window
 from scanner.macro_sector_engine import MacroSectorNewsEngine
 from scanner.crude_scanner import scan_mcx_crude_oil
 from scanner.crude_news_engine import is_crude_news_blackout_window
+from scanner.smart_scanner import scan_smart_opportunities
 from execution.upstox_trader import UpstoxOptionsTrader
 from execution.telegram_control import start_telegram_listener_background, is_bot_disabled
 from reporting.eod_reporter import generate_eod_report
@@ -124,18 +125,23 @@ def run_mcx_crude_pipeline(
         print("[Error] Failed to acquire valid access token for MCX Session.")
         return
 
-    # 4. Scan MCX Crude Oil 5-Min Candles
-    candidate = scan_mcx_crude_oil(access_token=access_token)
+    # 4. Scan MCX Crude Oil Multi-Factor 100-Point Matrix via Smart Scanner
+    candidate = scan_smart_opportunities(
+        access_token=access_token,
+        session_override="mcx",
+        dry_run=False
+    )
     if not candidate:
-        print("[MCX Pipeline] No qualified trend signal for MCX Crude Oil. Scan complete.")
+        print("[MCX Pipeline] No qualified trend signal for MCX Crude Oil (Score < 75 Pts). Scan complete.")
         return
 
-    # 5. Map MCX Option Contract (100 lot size, 50 pt strikes)
+    # 5. Map MCX Option Contract (Standard 100 lot or Mini 10 lot)
     option_contract = get_mcx_crude_option_contract(
         spot_price=candidate["spot_price"],
         direction=candidate["direction"],
         budget_cap=budget_cap,
-        option_type=candidate.get("option_type")
+        option_type=candidate.get("option_type"),
+        symbol_hint=candidate.get("symbol", "CRUDEOIL")
     )
 
     if not option_contract:
@@ -230,9 +236,14 @@ def run_daily_pipeline(
     sector_analytics = macro_engine.calculate_sector_sentiment_index()
     top_3_sectors = sector_analytics.get("top_3_sectors", [])
 
-    # STEP 3: TECH SCAN & FACTOR MATRIX SCORING
-    print("\n[09:30 AM] STEP 3: SIMULTANEOUS TECH SCAN & FACTOR MATRIX SCORING")
-    candidate = scan_nse500_and_indices(access_token=access_token, dry_run=False, top_3_sectors=top_3_sectors)
+    # STEP 3: TECH SCAN & FACTOR MATRIX SCORING (ENGINE A: NSE EQUITY 100-PT MATRIX)
+    print("\n[09:30 AM] STEP 3: SMART DUAL-ENGINE SCANNER MATRIX SCORING")
+    candidate = scan_smart_opportunities(
+        access_token=access_token,
+        session_override="nse",
+        top_3_sectors=top_3_sectors,
+        dry_run=False
+    )
     
     if not candidate:
         print("[Pipeline] No high-conviction candidate qualified (Composite Score >= 75 Pts). Pipeline complete.")

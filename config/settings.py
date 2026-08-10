@@ -131,7 +131,8 @@ MIN_PRICE_MOMENTUM_PCT = 0.012
 # MCX Crude Oil Commodity Options Settings
 MCX_CRUDE_SYMBOL = "CRUDEOIL"
 MCX_CRUDE_INSTRUMENT_KEY = "MCX_FO|CRUDEOIL"
-MCX_CRUDE_LOT_SIZE = 100                      # 1 Lot = 100 Barrels
+MCX_CRUDE_LOT_SIZE = 100                      # Standard Lot = 100 Barrels
+MCX_CRUDE_MINI_LOT_SIZE = 10                  # Mini Lot (CRUDEOILM) = 10 Barrels
 MCX_CRUDE_STRIKE_STEP = 50.0                  # Strike interval (50 points)
 MCX_CRUDE_MIN_ATR = 15.0                      # Volatility Gate: ATR(14) > 15 points required
 

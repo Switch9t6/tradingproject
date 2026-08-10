@@ -11,6 +11,7 @@ from config.settings import (
     MAX_BID_ASK_SPREAD_PCT,
     MCX_CRUDE_SYMBOL,
     MCX_CRUDE_LOT_SIZE,
+    MCX_CRUDE_MINI_LOT_SIZE,
     MCX_CRUDE_STRIKE_STEP
 )
 
@@ -19,13 +20,14 @@ def get_mcx_crude_option_contract(
     direction: str,
     budget_cap: Optional[float] = None,
     option_type: Optional[str] = None,
+    symbol_hint: str = "CRUDEOIL",
     simulated_spread_pct: float = 0.008
 ) -> Optional[Dict[str, Any]]:
     """
-    MCX Option Contract Mapper for MCX Crude Oil Options.
+    MCX Option Contract Mapper for MCX Crude Oil Options (Standard & Mini).
     Selects At-The-Money (ATM) or Slightly ITM Call (CE) or Put (PE) option contract.
-    Enforces contract lot size (100 barrels) budget check: (premium * 100 <= budget_cap).
-    Enforces Bid-Ask Spread <= 1.5% and Delta target 0.50-0.55.
+    Supports Standard CRUDEOIL (100 barrels) & Mini CRUDEOILM (10 barrels).
+    Automatically falls back to Mini contract if standard lot cost exceeds wallet budget cap.
     """
     if budget_cap is None:
         budget_cap = float("inf")
@@ -34,7 +36,6 @@ def get_mcx_crude_option_contract(
         option_type = "CE" if direction.upper() == "BULLISH" else "PE"
 
     strike_step = MCX_CRUDE_STRIKE_STEP # 50.0 points
-    lot_size = MCX_CRUDE_LOT_SIZE       # 100 barrels
 
     # Calculate ATM Strike (rounded to nearest 50 points)
     atm_strike = round(spot_price / strike_step) * strike_step
@@ -47,19 +48,30 @@ def get_mcx_crude_option_contract(
     ask_price = round(estimated_premium * (1.0 + (simulated_spread_pct / 2.0)), 2)
     bid_ask_spread_pct = (ask_price - bid_price) / ask_price if ask_price > 0 else 0.0
 
+    # Determine lot size: Standard (100 barrels) vs Mini (10 barrels)
+    std_lot_cost = round(ask_price * MCX_CRUDE_LOT_SIZE, 2)
+    
+    if symbol_hint == "CRUDEOILM" or (std_lot_cost > budget_cap and (ask_price * MCX_CRUDE_MINI_LOT_SIZE) <= budget_cap):
+        underlying_symbol = "CRUDEOILM"
+        lot_size = MCX_CRUDE_MINI_LOT_SIZE
+        print(f"  [Option Mapper Notice] Using Mini Crude Contract ({underlying_symbol}, Lot Size: {lot_size} barrels) for budget cap Rs {budget_cap:,.2f} INR.")
+    else:
+        underlying_symbol = MCX_CRUDE_SYMBOL
+        lot_size = MCX_CRUDE_LOT_SIZE
+
     total_lot_cost = round(ask_price * lot_size, 2)
 
-    option_symbol = f"CRUDEOIL_{int(atm_strike)}_{option_type}"
-    instrument_key = f"MCX_FO|CRUDEOIL_{int(atm_strike)}_{option_type}"
+    option_symbol = f"{underlying_symbol}_{int(atm_strike)}_{option_type}"
+    instrument_key = f"MCX_FO|{underlying_symbol}_{int(atm_strike)}_{option_type}"
 
     budget_approved = total_lot_cost <= budget_cap
     spread_approved = bid_ask_spread_pct <= MAX_BID_ASK_SPREAD_PCT
     delta_approved = (estimated_delta >= TARGET_DELTA_MIN) and (estimated_delta <= TARGET_DELTA_MAX)
     open_interest = 120000
-    oi_approved = open_interest >= 100000
+    oi_approved = open_interest >= 1000
 
     mapped_contract = {
-        "underlying_symbol": MCX_CRUDE_SYMBOL,
+        "underlying_symbol": underlying_symbol,
         "exchange": "MCX_FO",
         "option_symbol": option_symbol,
         "instrument_key": instrument_key,
@@ -81,7 +93,7 @@ def get_mcx_crude_option_contract(
     print(f"  Mapped Contract     : {option_symbol}")
     print(f"  ATM Strike Price    : Rs {atm_strike} ({option_type}) | Delta: {estimated_delta:.2f}")
     print(f"  Bid / Ask Quote     : Rs {bid_price:.2f} / Rs {ask_price:.2f} (Spread: {bid_ask_spread_pct*100:.2f}%)")
-    print(f"  Lot Size (Barrels)  : {lot_size} barrels")
+    print(f"  Lot Size (Barrels)  : {lot_size} barrels ({'Mini' if lot_size == 10 else 'Standard'})")
     print(f"  Total Lot Cost      : Rs {total_lot_cost:,.2f} INR (Budget Cap: Rs {budget_cap:,.2f} INR)")
     print(f"  Spread Check        : {'APPROVED (<= 1.5%)' if spread_approved else 'REJECTED'}")
     print(f"  Budget Status       : {'APPROVED' if budget_approved else 'REJECTED (Exceeds Budget)'}")
@@ -106,6 +118,7 @@ def resolve_atm_option_contract(
             direction=candidate["direction"],
             budget_cap=max_budget,
             option_type=candidate.get("option_type"),
+            symbol_hint=candidate.get("symbol", "CRUDEOIL"),
             simulated_spread_pct=simulated_spread_pct
         )
 
@@ -190,5 +203,5 @@ if __name__ == "__main__":
         "option_type": "CE",
         "is_mcx": True
     }
-    res = resolve_atm_option_contract(mcx_cand, max_budget=10000.0)
+    res = resolve_atm_option_contract(mcx_cand, max_budget=1000.0)
     print("MCX Resolved:", res)
