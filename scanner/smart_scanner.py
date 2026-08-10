@@ -238,7 +238,9 @@ def scan_mcx_crude_oil_multifactor(
 
     composite_score = round(tech_score + global_lead_score + atr_score + currency_score + spread_health_score, 2)
 
-    if composite_score >= 75.0 and is_tech_aligned and atr_14_val >= MCX_CRUDE_MIN_ATR:
+    from config.settings import QUALIFICATION_SCORE_THRESHOLD
+
+    if composite_score >= QUALIFICATION_SCORE_THRESHOLD and is_tech_aligned and atr_14_val >= MCX_CRUDE_MIN_ATR:
         breakout_reason = f"NYMEX WTI Momentum (+{nymex_wti_5m_return:.2f}%) + Supertrend Green + ATR Expansion ({atr_14_val:.1f} pts)"
         
         candidate = {
@@ -276,12 +278,12 @@ def scan_mcx_crude_oil_multifactor(
 
         print(f"\n[ENGINE B SIGNAL QUALIFIED]")
         print(f"  Candidate Contract   : {MCX_CRUDE_SYMBOL} (BULLISH CE)")
-        print(f"  Composite Score      : {composite_score} / 100 Pts")
+        print(f"  Composite Score      : {composite_score} / 100 Pts (Threshold >= {QUALIFICATION_SCORE_THRESHOLD} Pts)")
         print(f"  Breakout Reason      : {breakout_reason}")
         print("==========================================================================")
         return candidate
     else:
-        print(f"\n[ENGINE B NOTICE] Composite score ({composite_score:.1f}/100) below 75-Pt threshold. Skipping trade.")
+        print(f"\n[ENGINE B NOTICE] Composite score ({composite_score:.1f}/100) below {QUALIFICATION_SCORE_THRESHOLD}-Pt threshold. Skipping trade.")
         return None
 
 # ==============================================================================

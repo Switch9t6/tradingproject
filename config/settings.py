@@ -22,16 +22,19 @@ MAX_DAILY_TRADES = 1                      # HARD CAP: MAX 1 TRADE PER DAY
 TAKE_PROFIT_PCT = 0.25                    # Target: +25% on Option Premium
 STOP_LOSS_PCT = 0.12                      # Base Stop Loss: -12% on Option Premium
 
-# Step-Based Trailing Stop-Loss Rules (Breakeven at +10%, Lock +10% at +18%)
+# Step-Based Trailing Stop-Loss Rules (Breakeven at +8%, Lock +10% at +15%)
 USE_STEP_TRAILING_STOP_LOSS = True
-TSL_STEP1_TRIGGER_PCT = 0.10              # +10% Peak Gain -> Raise SL to Breakeven (0%)
-TSL_STEP1_LOCK_PCT = 0.00                 # Breakeven (0% gain)
-TSL_STEP2_TRIGGER_PCT = 0.18              # +18% Peak Gain -> Lock +10% Profit
+TSL_STEP1_TRIGGER_PCT = 0.08              # +8% Peak Gain -> Raise SL to Breakeven (+1%)
+TSL_STEP1_LOCK_PCT = 0.01                 # Lock +1% Profit (Breakeven + fee buffer)
+TSL_STEP2_TRIGGER_PCT = 0.15              # +15% Peak Gain -> Lock +10% Profit
 TSL_STEP2_LOCK_PCT = 0.10                 # Lock +10% Profit
 
-# 30-Minute Time-Decay Stagnation Exit Rule
-MAX_HOLD_SECONDS = 1800                   # 30 Minutes
-MIN_GAIN_REQUIRED_AT_30M = 1.05           # Must be up at least +5% after 30 mins to keep holding
+# 20-Minute Time-Decay Stagnation Exit Rule (Optimized to reduce drawdown from time decay)
+MAX_HOLD_SECONDS = 1200                   # 20 Minutes (Optimized from 30 mins)
+MIN_GAIN_REQUIRED_AT_30M = 1.05           # Must be up at least +5% after 20 mins to keep holding
+
+QUALIFICATION_SCORE_THRESHOLD = 80.0      # Optimized Composite Score Threshold (80/100 Pts)
+MIN_MICRO_PREMIUM_INR = 30.0              # Minimum option premium to keep friction < 4%
 
 # Full Liquid NSE Options (FnO) Universe (Indices + 60 Liquid FnO Equities)
 SCANNER_UNIVERSE = [
