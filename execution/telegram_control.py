@@ -414,10 +414,15 @@ def start_telegram_listener_background():
         import time
         while True:
             try:
-                bot.infinity_polling(timeout=30, long_polling_timeout=20)
+                bot.infinity_polling(timeout=30, long_polling_timeout=20, skip_pending=True)
             except Exception as e:
-                _safe_print(f"[Telegram Control Warning] Polling glitch: {e}. Auto-reconnecting in 5s...")
-                time.sleep(5)
+                err_str = str(e)
+                if "409" in err_str or "Conflict" in err_str:
+                    _safe_print("[Telegram Control] 409 Conflict (container transition overlap). Retrying in 8s...")
+                    time.sleep(8)
+                else:
+                    _safe_print(f"[Telegram Control Warning] Polling glitch: {e}. Auto-reconnecting in 5s...")
+                    time.sleep(5)
 
     t = threading.Thread(target=_polling_loop, daemon=True)
     t.start()
