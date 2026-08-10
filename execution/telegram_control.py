@@ -561,90 +561,40 @@ def _register_handlers(bot):
 
     @bot.message_handler(commands=["report", "reports", "report_csv"])
     def cmd_report(message):
-        # Single Unified Report Command: Returns summary text & interactive Web App URL
+        # Generates fresh HTML report file and sends document attachment directly in Telegram
         try:
-            import secrets
-            import html
+            from reports.trade_report import generate_html_report_file, get_trade_report_data
 
-            session_token = secrets.token_urlsafe(16)
-            port = os.getenv("PORT", "5000")
+            report_path = generate_html_report_file()
+            data = get_trade_report_data()
 
-            railway_url = os.getenv("RAILWAY_STATIC_URL", "")
-            public_url = os.getenv("WEB_REPORT_URL", os.getenv("PUBLIC_URL", ""))
+            net_pnl = data["net_pnl"]
+            pnl_str = f"+Rs {net_pnl:,.2f}" if net_pnl >= 0 else f"-Rs {abs(net_pnl):,.2f}"
 
-            if public_url:
-                base_url = public_url.rstrip("/")
-                if not base_url.startswith("http"):
-                    base_url = f"https://{base_url}"
-                primary_url = f"{base_url}/report?token={session_token}"
-                lan_url = None
-            elif railway_url:
-                base_url = f"https://{railway_url.rstrip('/')}"
-                primary_url = f"{base_url}/report?token={session_token}"
-                lan_url = None
-            else:
-                local_ip = _get_local_ip()
-                primary_url = f"http://{local_ip}:{port}/report?token={session_token}"
-                lan_url = f"http://localhost:{port}/report?token={session_token}"
-
-            # Ensure background web server is running on target port
-            try:
-                from web.server import start_web_server_background
-                start_web_server_background(port=int(port))
-            except Exception:
-                pass
-
-            msg_text = (
-                "📊 <b>[QUANT PERFORMANCE REPORT DASHBOARD]</b>\n"
+            caption_text = (
+                "📊 <b>[QUANT PERFORMANCE REPORT]</b>\n"
                 "========================================\n"
+                f"<b>Session Date   :</b> {data['start_date']}\n"
+                f"<b>Today's Trades :</b> {data['total_trades']} (NSE: {data['nse_trades']} | MCX: {data['mcx_trades']})\n"
+                f"<b>Win Rate       :</b> {data['win_rate']}%\n"
+                f"<b>Net Realized PnL:</b> <code>{pnl_str} INR</code>\n"
+                f"<b>Max Drawdown   :</b> {data['max_drawdown_pct']}%\n"
+                "========================================\n"
+                "📁 <i>Interactive HTML Report attached below. Open directly in your browser on PC or Mobile!</i>"
             )
 
-            try:
-                from reports.trade_report import get_trade_report_data
-                data = get_trade_report_data()
-                net_pnl = data["net_pnl"]
-                pnl_str = f"+Rs {net_pnl:,.2f}" if net_pnl >= 0 else f"-Rs {abs(net_pnl):,.2f}"
-
-                msg_text += (
-                    f"<b>Today's Trades  :</b> {data['total_trades']} (NSE: {data['nse_trades']} | MCX: {data['mcx_trades']})\n"
-                    f"<b>Win Rate        :</b> {data['win_rate']}%\n"
-                    f"<b>Net Realized PnL:</b> <code>{pnl_str} INR</code>\n"
-                    f"<b>Max Drawdown    :</b> {data['max_drawdown_pct']}%\n"
-                    "========================================\n"
-                )
-            except Exception:
-                pass
-
-            escaped_primary = html.escape(primary_url)
-            msg_text += f'👉 <a href="{escaped_primary}"><b>Open Interactive Performance Report</b></a> 👈\n\n'
-
-            if lan_url:
-                escaped_lan = html.escape(lan_url)
-                msg_text += (
-                    f"📱 <b>Phone / WiFi Link:</b>\n<code>{escaped_primary}</code>\n\n"
-                    f"💻 <b>PC Local Link:</b>\n<code>{escaped_lan}</code>\n\n"
-                )
+            if os.path.exists(report_path):
+                with open(report_path, "rb") as doc:
+                    try:
+                        bot.send_document(message.chat.id, doc, caption=caption_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
+                    except Exception:
+                        chat_id = TELEGRAM_CHAT_ID or message.chat.id
+                        bot.send_document(chat_id, doc, caption=caption_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
+                _safe_print(f"[Telegram Control] Interactive HTML report sent directly as document: {report_path}")
             else:
-                msg_text += f"<code>{escaped_primary}</code>\n\n"
-
-            msg_text += "<i>Tap the link above to view the interactive dashboard & download PDF reports.</i>"
-
-            is_https = primary_url.startswith("https://") and "localhost" not in primary_url and "127.0.0.1" not in primary_url
-
-            if is_https:
-                try:
-                    markup = telebot.types.InlineKeyboardMarkup(row_width=1)
-                    btn_web = telebot.types.InlineKeyboardButton("📊 Open Interactive Performance Report", url=primary_url)
-                    markup.add(btn_web)
-                    _send_or_reply(bot, message, msg_text, parse_mode="HTML", reply_markup=markup)
-                except Exception:
-                    _send_or_reply(bot, message, msg_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
-            else:
-                _send_or_reply(bot, message, msg_text, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
-
-            _safe_print(f"[Telegram Control] Sent interactive report URL: {primary_url}")
+                _send_or_reply(bot, message, "⚠️ [NO REPORT] Report file could not be generated.", reply_markup=_build_action_keyboard(telebot))
         except Exception as e:
-            _send_or_reply(bot, message, f"❌ Failed to generate report link: {e}")
+            _send_or_reply(bot, message, f"❌ Failed to generate report document: {e}")
 
     @bot.message_handler(commands=["trades"])
     def cmd_trades(message):

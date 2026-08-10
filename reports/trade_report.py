@@ -2,18 +2,20 @@
 Database Retrieval & Metrics Calculation Engine
 =================================================
 Queries SQLite (logs/trades.db) across specified date ranges and aggregate metrics
-for both NSE_FO and MCX_FO trading sessions.
+for both NSE_FO and MCX_FO trading sessions. Also generates self-contained interactive
+HTML report files.
 """
 
 import os
 import sys
+import json
 import sqlite3
 import datetime
 from typing import Dict, List, Any, Optional, Tuple
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config.settings import DB_FILE_PATH, INITIAL_WALLET_CAPITAL
+from config.settings import DB_FILE_PATH, INITIAL_WALLET_CAPITAL, REPORTS_DIR
 
 IST_TZ = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 
@@ -209,6 +211,269 @@ def get_trade_report_data(
         "itemized_trades": itemized_trades
     }
 
+def generate_html_report_file(start_date: Optional[str] = None, end_date: Optional[str] = None) -> str:
+    """
+    Generates a standalone, self-contained interactive HTML performance report file.
+    Saves to reports/LIVE_MARKET_REPORT.html and returns absolute file path.
+    """
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+
+    today_str = get_ist_today_str()
+    if not start_date:
+        start_date = today_str
+    if not end_date:
+        end_date = start_date
+
+    data = get_trade_report_data(start_date, end_date)
+
+    net_pnl = data["net_pnl"]
+    pnl_class = "green" if net_pnl >= 0 else "red"
+    pnl_sign = "+" if net_pnl >= 0 else ""
+
+    trades_json = json.dumps(data["itemized_trades"])
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quantitative System Performance Report | {start_date}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {{
+            --bg-primary: #0b0f19;
+            --bg-card: rgba(17, 24, 39, 0.8);
+            --border-card: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-blue: #38bdf8;
+            --accent-green: #22c55e;
+            --accent-red: #ef4444;
+            --accent-amber: #f59e0b;
+            --accent-purple: #a855f7;
+        }}
+        * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }}
+        body {{ background: var(--bg-primary); color: var(--text-primary); padding: 24px 16px; display: flex; justify-content: center; min-height: 100vh; }}
+        .container {{ width: 100%; max-width: 1200px; display: flex; flex-direction: column; gap: 20px; }}
+        .header {{ background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 16px; padding: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }}
+        .header h1 {{ font-size: 1.4rem; font-weight: 700; background: linear-gradient(135deg, #fff, #94a3b8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
+        .badge {{ padding: 6px 14px; border-radius: 30px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; background: rgba(56, 189, 248, 0.15); color: var(--accent-blue); border: 1px solid rgba(56, 189, 248, 0.3); }}
+        
+        .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }}
+        .metric-card {{ background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 6px; position: relative; overflow: hidden; }}
+        .metric-card::before {{ content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: var(--accent-blue); }}
+        .metric-card.green::before {{ background: var(--accent-green); }}
+        .metric-card.red::before {{ background: var(--accent-red); }}
+        .metric-label {{ font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; }}
+        .metric-val {{ font-size: 1.35rem; font-weight: 700; }}
+        .metric-sub {{ font-size: 0.75rem; color: var(--text-secondary); }}
+        .text-green {{ color: var(--accent-green); }}
+        .text-red {{ color: var(--accent-red); }}
+
+        .analytics-row {{ display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }}
+        @media (max-width: 850px) {{ .analytics-row {{ grid-template-columns: 1fr; }} }}
+        .chart-card {{ background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 14px; padding: 20px; height: 260px; }}
+        
+        .table-card {{ background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 14px; }}
+        .table-header {{ display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }}
+        .search-input {{ background: rgba(0,0,0,0.3); border: 1px solid var(--border-card); padding: 8px 14px; border-radius: 8px; color: #fff; font-size: 0.82rem; outline: none; width: 220px; }}
+        .table-wrapper {{ overflow-x: auto; }}
+        table {{ width: 100%; border-collapse: collapse; font-size: 0.83rem; text-align: left; }}
+        th {{ background: rgba(255,255,255,0.03); color: var(--text-secondary); padding: 12px 14px; border-bottom: 1px solid var(--border-card); font-size: 0.72rem; text-transform: uppercase; }}
+        td {{ padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,0.04); white-space: nowrap; }}
+        .tag {{ padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; background: rgba(56, 189, 248, 0.15); color: var(--accent-blue); }}
+        .tag-mcx {{ background: rgba(168, 85, 247, 0.15); color: var(--accent-purple); }}
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <div>
+            <h1><i class="fa-solid fa-chart-line" style="color: var(--accent-blue);"></i> QUANTITATIVE SYSTEM PERFORMANCE REPORT</h1>
+            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px;">Period: {start_date} to {end_date} | DhanHQ Live Synced</p>
+        </div>
+        <span class="badge"><i class="fa-solid fa-shield-halved"></i> DhanHQ API v2 Verified</span>
+    </div>
+
+    <div class="metrics-grid">
+        <div class="metric-card {pnl_class}">
+            <div class="metric-label">Net Realized PnL</div>
+            <div class="metric-val text-{pnl_class}">{pnl_sign}Rs {abs(net_pnl):,.2f} INR</div>
+            <div class="metric-sub">Gross: Rs {data['gross_pnl']:,.2f} | Fees: Rs {data['total_friction']:,.2f}</div>
+        </div>
+
+        <div class="metric-card blue">
+            <div class="metric-label">Win Rate %</div>
+            <div class="metric-val">{data['win_rate']:.1f}%</div>
+            <div class="metric-sub">{data['winning_trades']} Win / {data['losing_trades']} Loss</div>
+        </div>
+
+        <div class="metric-card amber">
+            <div class="metric-label">Max Drawdown</div>
+            <div class="metric-val">{data['max_drawdown_pct']:.2f}%</div>
+            <div class="metric-sub">Rs {data['max_drawdown_inr']:,.2f} Drop</div>
+        </div>
+
+        <div class="metric-card purple">
+            <div class="metric-label">Session Breakdown</div>
+            <div class="metric-val">{data['total_trades']} Trades</div>
+            <div class="metric-sub">NSE: {data['nse_trades']} | MCX: {data['mcx_trades']}</div>
+        </div>
+    </div>
+
+    <div class="analytics-row">
+        <div class="chart-card">
+            <canvas id="equityChart"></canvas>
+        </div>
+        <div class="chart-card">
+            <canvas id="winPieChart"></canvas>
+        </div>
+    </div>
+
+    <div class="table-card">
+        <div class="table-header">
+            <div style="font-weight: 600;"><i class="fa-solid fa-list-check" style="color: var(--accent-blue);"></i> Itemized Execution Log</div>
+            <input type="text" class="search-input" id="tableSearch" placeholder="🔍 Search trades..." onkeyup="filterTable()">
+        </div>
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Date & Time</th>
+                        <th>Option Contract</th>
+                        <th>Session</th>
+                        <th>Qty</th>
+                        <th>Entry</th>
+                        <th>Exit</th>
+                        <th>Exit Reason</th>
+                        <th>Net PnL</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    const rawTrades = {trades_json};
+    const initialCapital = {data['initial_capital']};
+
+    function renderTable(trades) {{
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = '';
+        if (!trades || trades.length === 0) {{
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color: #94a3b8; padding: 20px;">No trades executed in selected period.</td></tr>';
+            return;
+        }}
+        trades.forEach(t => {{
+            const tr = document.createElement('tr');
+            const pnlClass = t.net_pnl >= 0 ? 'text-green' : 'text-red';
+            const pnlSign = t.net_pnl >= 0 ? '+' : '';
+            const tagClass = t.exchange === 'MCX_FO' ? 'tag-mcx' : 'tag';
+            tr.innerHTML = `
+                <td>${{t.id}}</td>
+                <td>${{t.trade_date}}<br/><span style="color:#94a3b8; font-size: 0.75rem;">${{t.entry_time}}</span></td>
+                <td><strong>${{t.option_symbol}}</strong></td>
+                <td><span class="${{tagClass}}">${{t.exchange}}</span></td>
+                <td>${{t.quantity}}</td>
+                <td>Rs ${{t.entry_premium.toFixed(2)}}</td>
+                <td>Rs ${{t.exit_premium.toFixed(2)}}</td>
+                <td>${{t.exit_reason}}</td>
+                <td class="${{pnlClass}}">${{pnlSign}}Rs ${{t.net_pnl.toFixed(2)}}</td>
+            `;
+            tbody.appendChild(tr);
+        }});
+    }}
+
+    function filterTable() {{
+        const q = document.getElementById('tableSearch').value.toLowerCase();
+        const filtered = rawTrades.filter(t => 
+            t.option_symbol.toLowerCase().includes(q) ||
+            t.exit_reason.toLowerCase().includes(q) ||
+            t.exchange.toLowerCase().includes(q) ||
+            t.trade_date.includes(q)
+        );
+        renderTable(filtered);
+    }}
+
+    renderTable(rawTrades);
+
+    // Equity Line Chart
+    let labels = ['Start'];
+    let curve = [initialCapital];
+    let cumPnl = initialCapital;
+    rawTrades.forEach((t, i) => {{
+        cumPnl += t.net_pnl;
+        labels.push(`Trade #${{i+1}}`);
+        curve.push(cumPnl);
+    }});
+
+    new Chart(document.getElementById('equityChart'), {{
+        type: 'line',
+        data: {{
+            labels: labels,
+            datasets: [{{
+                label: 'Equity (INR)',
+                data: curve,
+                borderColor: '#38bdf8',
+                backgroundColor: 'rgba(56, 189, 248, 0.08)',
+                fill: true,
+                tension: 0.3,
+                borderWidth: 2
+            }}]
+        }},
+        options: {{
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {{ legend: {{ display: false }} }},
+            scales: {{
+                x: {{ grid: {{ color: 'rgba(255,255,255,0.04)' }}, ticks: {{ color: '#94a3b8' }} }},
+                y: {{ grid: {{ color: 'rgba(255,255,255,0.04)' }}, ticks: {{ color: '#94a3b8' }} }}
+            }}
+        }}
+    }});
+
+    // Win Share Doughnut Chart
+    new Chart(document.getElementById('winPieChart'), {{
+        type: 'doughnut',
+        data: {{
+            labels: ['Wins', 'Losses', 'Breakeven'],
+            datasets: [{{
+                data: [{data['winning_trades']}, {data['losing_trades']}, {data['breakeven_trades']}],
+                backgroundColor: ['#22c55e', '#ef4444', '#f59e0b']
+            }}]
+        }},
+        options: {{
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {{ legend: {{ position: 'bottom', labels: {{ color: '#94a3b8' }} }} }},
+            cutout: '70%'
+        }}
+    }});
+</script>
+
+</body>
+</html>
+"""
+
+    report_path = os.path.join(REPORTS_DIR, "LIVE_MARKET_REPORT.html")
+    dated_path = os.path.join(REPORTS_DIR, f"EOD_Report_LIVE_{start_date}.html")
+
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    with open(dated_path, "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    return report_path
+
 if __name__ == "__main__":
-    data = get_trade_report_data()
-    print("Report Data Test:", data)
+    p = generate_html_report_file()
+    print("Generated HTML Report at:", p)
