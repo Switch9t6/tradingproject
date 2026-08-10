@@ -163,12 +163,37 @@ def _get_bot():
     if _bot is None and TELEGRAM_BOT_TOKEN and not TELEGRAM_BOT_TOKEN.startswith("your_"):
         try:
             import telebot
+            import logging
+            telebot.logger.setLevel(logging.CRITICAL)
             _bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
             _register_handlers(_bot)
         except ImportError:
             _safe_print("[Telegram Control] pyTelegramBotAPI not installed. Run: pip install pyTelegramBotAPI")
             return None
     return _bot
+
+
+def start_telegram_listener_background():
+    """
+    Starts the Telegram bot polling in a non-blocking background thread.
+    Safe to call multiple times -- only the first call starts the listener.
+    """
+    global _listener_started
+
+    if _listener_started:
+        return
+
+    if os.getenv("TELEGRAM_LISTENER_DISABLED") == "1":
+        _safe_print("[Telegram Control] Sub-process execution mode. Skipping duplicate Telegram polling listener.")
+        return
+
+    if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN.startswith("your_"):
+        _safe_print("[Telegram Control] TELEGRAM_BOT_TOKEN not configured. Background listener skipped.")
+        return
+
+    bot = _get_bot()
+    if bot is None:
+        return
 
 
 def _register_handlers(bot):
@@ -192,7 +217,9 @@ def _register_handlers(bot):
             try:
                 cmd = [sys.executable, "main.py", "--live"]
                 _safe_print(f"[Telegram Control] Executing command via /start: {' '.join(cmd)}")
-                subprocess.run(cmd, check=True)
+                env = os.environ.copy()
+                env["TELEGRAM_LISTENER_DISABLED"] = "1"
+                subprocess.run(cmd, env=env, check=True)
             except Exception as e:
                 _safe_print(f"[Telegram Control Error] Execution failed: {e}")
 
