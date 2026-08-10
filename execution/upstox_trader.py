@@ -221,7 +221,7 @@ class UpstoxOptionsTrader:
             try:
                 body = upstox_client.PlaceOrderRequest(
                     quantity=lot_size,
-                    product="I",
+                    product="D",
                     validity="DAY",
                     price=limit_price,
                     tag="OPTIONS_BOT",

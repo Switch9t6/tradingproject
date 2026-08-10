@@ -1,7 +1,112 @@
 import os
 import sys
-import math
-from typing import Dict, Any, Optional
+import time
+import gzip
+import json
+import requests
+
+_mcx_instrument_cache = None
+_nse_instrument_cache = None
+
+def get_mcx_instrument_map() -> dict:
+    global _mcx_instrument_cache
+    if _mcx_instrument_cache is not None:
+        return _mcx_instrument_cache
+
+    cache_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "mcx_instruments.json")
+    if os.path.exists(cache_file):
+        try:
+            mtime = os.path.getmtime(cache_file)
+            if time.time() - mtime < 86400:
+                with open(cache_file, "r") as f:
+                    _mcx_instrument_cache = json.load(f)
+                    return _mcx_instrument_cache
+        except Exception:
+            pass
+
+    try:
+        url = "https://assets.upstox.com/market-quote/instruments/exchange/MCX.csv.gz"
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            content = gzip.decompress(r.content).decode("utf-8")
+            lines = content.splitlines()
+            instr_map = {}
+            for l in lines[1:]:
+                parts = [p.strip('"') for p in l.split(',')]
+                if len(parts) >= 11 and parts[9] == "OPTFUT":
+                    ikey, token, tsym, name, ltp, expiry, strike, tick, lot, itype, otype, ex = parts[:12]
+                    try:
+                        stk = float(strike)
+                        und = "CRUDEOILM" if tsym.startswith("CRUDEOILM") else "CRUDEOIL"
+                        key = f"{und}_{int(stk)}_{otype}"
+                        if key not in instr_map or expiry < instr_map[key]["expiry"]:
+                            instr_map[key] = {
+                                "instrument_key": ikey,
+                                "tradingsymbol": tsym,
+                                "expiry": expiry,
+                                "lot_size": int(lot)
+                            }
+                    except Exception:
+                        pass
+            _mcx_instrument_cache = instr_map
+            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+            with open(cache_file, "w") as f:
+                json.dump(instr_map, f)
+            return instr_map
+    except Exception as e:
+        print(f"[Option Mapper Notice] Could not fetch Upstox MCX master CSV: {e}")
+
+    return {}
+
+def get_nse_instrument_map() -> dict:
+    global _nse_instrument_cache
+    if _nse_instrument_cache is not None:
+        return _nse_instrument_cache
+
+    cache_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "nse_instruments.json")
+    if os.path.exists(cache_file):
+        try:
+            mtime = os.path.getmtime(cache_file)
+            if time.time() - mtime < 86400:
+                with open(cache_file, "r") as f:
+                    _nse_instrument_cache = json.load(f)
+                    return _nse_instrument_cache
+        except Exception:
+            pass
+
+    try:
+        url = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.csv.gz"
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            content = gzip.decompress(r.content).decode("utf-8")
+            lines = content.splitlines()
+            instr_map = {}
+            for l in lines[1:]:
+                parts = [p.strip('"') for p in l.split(',')]
+                if len(parts) >= 11 and parts[9] in ["OPTIDX", "OPTSTK"]:
+                    ikey, token, tsym, name, ltp, expiry, strike, tick, lot, itype, otype, ex = parts[:12]
+                    try:
+                        stk = float(strike)
+                        und = name.upper() if name else tsym.split("26")[0]
+                        key = f"{und}_{int(stk)}_{otype}"
+                        if key not in instr_map or expiry < instr_map[key]["expiry"]:
+                            instr_map[key] = {
+                                "instrument_key": ikey,
+                                "tradingsymbol": tsym,
+                                "expiry": expiry,
+                                "lot_size": int(lot)
+                            }
+                    except Exception:
+                        pass
+            _nse_instrument_cache = instr_map
+            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+            with open(cache_file, "w") as f:
+                json.dump(instr_map, f)
+            return instr_map
+    except Exception as e:
+        print(f"[Option Mapper Notice] Could not fetch Upstox NSE master CSV: {e}")
+
+    return {}
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -61,8 +166,12 @@ def get_mcx_crude_option_contract(
 
     total_lot_cost = round(ask_price * lot_size, 2)
 
-    option_symbol = f"{underlying_symbol}_{int(atm_strike)}_{option_type}"
-    instrument_key = f"MCX_FO|{underlying_symbol}_{int(atm_strike)}_{option_type}"
+    mcx_map = get_mcx_instrument_map()
+    lookup_key = f"{underlying_symbol}_{int(atm_strike)}_{option_type}"
+    real_info = mcx_map.get(lookup_key, {})
+
+    instrument_key = real_info.get("instrument_key", f"MCX_FO|{underlying_symbol}_{int(atm_strike)}_{option_type}")
+    option_symbol = real_info.get("tradingsymbol", f"{underlying_symbol}_{int(atm_strike)}_{option_type}")
 
     budget_approved = total_lot_cost <= budget_cap
     spread_approved = bid_ask_spread_pct <= MAX_BID_ASK_SPREAD_PCT
@@ -151,8 +260,12 @@ def resolve_atm_option_contract(
     
     total_lot_cost = round(ask_price * lot_size, 2)
     
-    option_symbol = f"{symbol}_{int(atm_strike)}_{option_type}"
-    instrument_key = f"NSE_FO|{symbol}_{int(atm_strike)}_{option_type}"
+    nse_map = get_nse_instrument_map()
+    lookup_key = f"{symbol}_{int(atm_strike)}_{option_type}"
+    real_info = nse_map.get(lookup_key, {})
+
+    instrument_key = real_info.get("instrument_key", f"NSE_FO|{symbol}_{int(atm_strike)}_{option_type}")
+    option_symbol = real_info.get("tradingsymbol", f"{symbol}_{int(atm_strike)}_{option_type}")
     
     budget_approved = total_lot_cost <= max_budget
     spread_approved = bid_ask_spread_pct <= MAX_BID_ASK_SPREAD_PCT
