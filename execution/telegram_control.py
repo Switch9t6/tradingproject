@@ -305,7 +305,7 @@ def _register_handlers(bot):
 
         def _run_pipeline_job():
             try:
-                cmd = [sys.executable, "main.py", "--live", "--auto-approve"]
+                cmd = [sys.executable, "main.py", "--live", "--auto-approve", "--override-daily-limit"]
                 _safe_print(f"[Telegram Control] Executing command via /start: {' '.join(cmd)}")
                 env = os.environ.copy()
                 env["TELEGRAM_LISTENER_DISABLED"] = "1"
@@ -318,6 +318,8 @@ def _register_handlers(bot):
                     bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[UPSTOX IP RESTRICTION]</b>\nUpstox blocked local origin IP (UDAPI1154). Order execution must run on Railway cloud.", parse_mode="HTML")
                 elif out and "Session lock" in out:
                     bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[SESSION LOCK]</b> Session trade cap reached for today.", parse_mode="HTML")
+                else:
+                    bot.send_message(TELEGRAM_CHAT_ID, f"ℹ️ <b>[PIPELINE SUMMARY]</b>\n<pre>{out[-400:] if out else 'Scan finished'}</pre>", parse_mode="HTML")
             except Exception as ex:
                 _safe_print(f"[Telegram Control Run Error] {ex}")
 
@@ -382,7 +384,7 @@ def _register_handlers(bot):
 
             def _run_resume_job():
                 try:
-                    cmd = [sys.executable, "main.py", "--live", "--auto-approve"]
+                    cmd = [sys.executable, "main.py", "--live", "--auto-approve", "--override-daily-limit"]
                     _safe_print(f"[Telegram Control] Executing pipeline scan via /resume: {' '.join(cmd)}")
                     env = os.environ.copy()
                     env["TELEGRAM_LISTENER_DISABLED"] = "1"
@@ -395,6 +397,8 @@ def _register_handlers(bot):
                         bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[UPSTOX IP RESTRICTION]</b>\nUpstox blocked local origin IP (UDAPI1154). Order execution must run on Railway cloud.", parse_mode="HTML")
                     elif out and "Session lock" in out:
                         bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[SESSION LOCK]</b> Session trade cap reached for today.", parse_mode="HTML")
+                    else:
+                        bot.send_message(TELEGRAM_CHAT_ID, f"ℹ️ <b>[PIPELINE SUMMARY]</b>\n<pre>{out[-400:] if out else 'Scan finished'}</pre>", parse_mode="HTML")
                 except Exception as ex:
                     _safe_print(f"[Telegram Control Run Error] {ex}")
 
