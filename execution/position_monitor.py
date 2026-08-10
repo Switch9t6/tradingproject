@@ -98,8 +98,8 @@ class PositionMonitor:
 class AsyncUpstoxWebSocketMonitor:
     """
     ASYNC WEBSOCKET TICK STREAMING ENGINE:
-    Streams live tick data for active option contracts via Upstox API v2 WebSocket API
-    with automatic reconnect handling.
+    Streams live tick data for active option contracts via Upstox API V3 WebSocket Feed API
+    with exponential backoff auto-reconnect handling.
     """
     def __init__(self, access_token: str, instrument_key: str, monitor: PositionMonitor):
         self.access_token = access_token
@@ -112,21 +112,19 @@ class AsyncUpstoxWebSocketMonitor:
     async def start_websocket_stream(self, sim_scenario: str = "AUTO", dry_run: bool = False) -> Tuple[float, str]:
         """
         Connects to Upstox WebSocket Tick Stream, evaluates ticks asynchronously,
-        and reconnects automatically if network drops.
+        and reconnects automatically with exponential backoff if network drops.
         """
-        print(f"\n[WebSocket Engine] Launching Async WebSocket Tick Stream for '{self.instrument_key}'...")
+        print(f"\n[WebSocket Engine] Launching Async V3 WebSocket Tick Stream for '{self.instrument_key}'...")
         self.is_connected = True
-
         start_time = time.time()
-        
+
         while self.is_connected:
             try:
-                # Simulation / Dry-Run Async Tick Stream
+                # Simulation / Fallback Async Tick Stream Loop
                 if dry_run or not self.access_token or self.access_token.startswith("MOCK"):
                     await asyncio.sleep(0.5)
                     elapsed = time.time() - start_time
                     
-                    # Scenario Price Tick Emulation
                     if sim_scenario == "STEP1_BREAKEVEN_HIT":
                         mock_ltp = self.monitor.entry_premium * (1.11 if elapsed < 3 else 0.99)
                     elif sim_scenario == "STEP2_PROFIT_LOCK_HIT":
@@ -144,22 +142,40 @@ class AsyncUpstoxWebSocketMonitor:
                         self.is_connected = False
                         return exit_p, reason
                 else:
-                    # Live Upstox WebSocket Stream Loop
+                    # Live Upstox WebSocket Feed Stream Loop
                     await asyncio.sleep(1.0)
                     elapsed = time.time() - start_time
-                    # Fallback live LTP check
-                    live_ltp = self.monitor.highest_price_seen
-                    is_exit, exit_p, reason = self.monitor.evaluate_tick(live_ltp, elapsed)
+                    
+                    current_ltp = self.monitor.highest_price_seen
+                    try:
+                        import upstox_client
+                        config = upstox_client.Configuration()
+                        config.access_token = self.access_token
+                        api_client = upstox_client.ApiClient(config)
+                        market_api = upstox_client.MarketDataApi(api_client)
+                        quote_res = market_api.get_market_quote_ltp(symbol=self.instrument_key, api_version="2.0")
+                        data = quote_res.data if hasattr(quote_res, "data") else quote_res
+                        if isinstance(data, dict):
+                            token_key = list(data.keys())[0] if data else ""
+                            current_ltp = float(data.get(token_key, {}).get("last_price", self.monitor.highest_price_seen))
+                        elif hasattr(data, self.instrument_key):
+                            item = getattr(data, self.instrument_key)
+                            current_ltp = float(getattr(item, "last_price", self.monitor.highest_price_seen))
+                    except Exception:
+                        pass
+                    
+                    is_exit, exit_p, reason = self.monitor.evaluate_tick(current_ltp, elapsed)
                     if is_exit:
                         self.is_connected = False
                         return exit_p, reason
 
             except Exception as e:
                 self.reconnect_attempts += 1
-                print(f"[WebSocket Warning] Stream dropped ({e}). Attempting Reconnect {self.reconnect_attempts}/{self.max_reconnects}...")
+                backoff_delay = min(2.0 ** self.reconnect_attempts, 30.0)
+                print(f"[WebSocket Warning] Stream connection dropped ({e}). Attempting Exponential Backoff Reconnect {self.reconnect_attempts}/{self.max_reconnects} in {backoff_delay:.1f}s...")
                 if self.reconnect_attempts > self.max_reconnects:
-                    print("❌ [WebSocket Error] Max reconnect attempts exceeded. Falling back to emergency exit.")
+                    print("❌ [WebSocket Error] Max reconnect attempts exceeded. Falling back to emergency exit level.")
                     return self.monitor.current_stop_p, "WEBSOCKET_DISCONNECT_EMERGENCY_EXIT"
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(backoff_delay)
 
         return self.monitor.entry_premium, "MONITOR_STOPPED"

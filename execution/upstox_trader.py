@@ -212,18 +212,30 @@ class UpstoxOptionsTrader:
                 order_id = getattr(api_resp, "order_id", getattr(api_resp, "data", {}).get("order_id", ""))
                 print(f"[LIVE LIMIT ORDER PLACED] Order ID: {order_id} | Response: {api_resp}")
                 
-                # 5-Second Fill Verification Loop
-                time.sleep(LIMIT_ORDER_TIMEOUT_SECONDS)
-                if order_id:
+                # 5-Second Fill Verification Loop (polling status every 1 second for up to 5 seconds)
+                filled = False
+                for sec in range(1, LIMIT_ORDER_TIMEOUT_SECONDS + 1):
+                    time.sleep(1.0)
+                    if order_id:
+                        try:
+                            ord_detail = self.order_api.get_order_details(order_id=order_id, api_version="2.0")
+                            data = ord_detail.data if hasattr(ord_detail, "data") else ord_detail
+                            ord_status = str(data.get("status", "") if isinstance(data, dict) else getattr(data, "status", "")).lower()
+                            if ord_status in ["complete", "filled"]:
+                                filled = True
+                                print(f"✅ [ORDER FILLED] Order {order_id} filled within {sec}s (Status: {ord_status}).")
+                                break
+                        except Exception as err:
+                            print(f"[Fill Verification Sec {sec}] Status check: {err}")
+
+                if not filled and order_id:
+                    print(f"⚠️ [5-Sec Fill Timeout] Order {order_id} remains UNFILLED after 5 seconds. Dispatching API cancel_order()...")
                     try:
-                        ord_detail = self.order_api.get_order_details(order_id=order_id, api_version="2.0")
-                        ord_status = ord_detail.get("data", {}).get("status", "complete").lower()
-                        if ord_status not in ["complete", "filled"]:
-                            print(f"⚠️ [5-Sec Fill Timeout] Order {order_id} unfilled (Status: {ord_status}). Cancelling to prevent chasing overextended options...")
-                            self.order_api.cancel_order(order_id=order_id, api_version="2.0")
-                            return None
-                    except Exception as err:
-                        print(f"[Fill Verification Notice] Status check: {err}")
+                        self.order_api.cancel_order(order_id=order_id, api_version="2.0")
+                        print(f"🛑 [ORDER CANCELLED] Order {order_id} successfully cancelled. Preventing chasing overextended options.")
+                    except Exception as cancel_err:
+                        print(f"⚠️ [Cancel Order Error] Could not cancel order {order_id}: {cancel_err}")
+                    return None
             except Exception as e:
                 print(f"[LIVE ORDER ERROR] Failed to place order: {e}")
 
