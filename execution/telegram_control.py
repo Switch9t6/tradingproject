@@ -308,36 +308,19 @@ def _register_handlers(bot):
 
     @bot.message_handler(commands=["report", "reports"])
     def cmd_report(message):
-        # /report and /reports work ANYTIME (both when market is open and closed)
-        import glob
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        reports_dir = os.path.join(base_dir, "reports")
+        # /report sends the single active report file: LIVE_MARKET_REPORT.html
+        from config.settings import REPORTS_DIR
+        report_path = os.path.join(REPORTS_DIR, "LIVE_MARKET_REPORT.html")
 
-        today_str = datetime.date.today().strftime("%Y%m%d")
-        candidates = [
-            os.path.join(reports_dir, f"EOD_Report_LIVE_{today_str}.html"),
-            os.path.join(reports_dir, f"LIVE_MARKET_REPORT_{today_str}.html"),
-            os.path.join(reports_dir, "LIVE_MARKET_REPORT.html"),
-        ]
-
-        # Filter strictly for live reports (excluding dry-run reports)
-        all_reports = [f for f in sorted(glob.glob(os.path.join(reports_dir, "*.html")), key=os.path.getmtime, reverse=True) if "DRYRUN" not in os.path.basename(f)]
-
-        sent = False
-        for report_path in candidates + all_reports:
-            if os.path.exists(report_path):
-                try:
-                    with open(report_path, "rb") as doc:
-                        bot.send_document(message.chat.id, doc, caption=f"[LIVE EOD REPORT] {os.path.basename(report_path)}", reply_markup=_build_action_keyboard(telebot))
-                    sent = True
-                    _safe_print(f"[Telegram Control] Live report sent: {os.path.basename(report_path)}")
-                    break
-                except Exception as e:
-                    bot.reply_to(message, f"[ERROR] Failed to send report: {e}")
-                    return
-
-        if not sent:
-            bot.reply_to(message, "[NO REPORTS] No live market EOD report files found yet for today.", reply_markup=_build_action_keyboard(telebot))
+        if os.path.exists(report_path):
+            try:
+                with open(report_path, "rb") as doc:
+                    bot.send_document(message.chat.id, doc, caption="[LIVE MARKET REPORT] LIVE_MARKET_REPORT.html", reply_markup=_build_action_keyboard(telebot))
+                _safe_print("[Telegram Control] Live report sent: LIVE_MARKET_REPORT.html")
+            except Exception as e:
+                bot.reply_to(message, f"[ERROR] Failed to send report: {e}")
+        else:
+            bot.reply_to(message, "[NO REPORTS] LIVE_MARKET_REPORT.html not found yet.", reply_markup=_build_action_keyboard(telebot))
 
     @bot.message_handler(commands=["trades"])
     def cmd_trades(message):

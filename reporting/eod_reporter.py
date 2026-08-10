@@ -537,13 +537,13 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
         trades=trades
     )
     
-    report_filename = f"{file_prefix}{date_str.replace('-', '')}.html"
+    report_filename = "LIVE_MARKET_REPORT.html"
     report_path = os.path.join(REPORTS_DIR, report_filename)
     
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html_output)
         
-    print(f"\n[EOD Reporter] HTML dashboard successfully saved to: '{report_path}'")
+    print(f"\n[EOD Reporter] HTML dashboard successfully saved to single active report file: '{report_path}'")
     return report_path
 
 if __name__ == "__main__":

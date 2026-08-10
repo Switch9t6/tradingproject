@@ -563,18 +563,12 @@ def generate_live_market_report(date_str: str = None) -> str:
         trades=trades
     )
     
-    report_filename = f"LIVE_MARKET_REPORT_{date_str.replace('-', '')}.html"
-    report_path = os.path.join(REPORTS_DIR, report_filename)
+    report_path = os.path.join(REPORTS_DIR, "LIVE_MARKET_REPORT.html")
     
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html_output)
-        
-    shortcut_path = os.path.join(REPORTS_DIR, "LIVE_MARKET_REPORT.html")
-    with open(shortcut_path, "w", encoding="utf-8") as f:
-        f.write(html_output)
 
-    print(f"\n[Live Reporter] Pure Live HTML dashboard saved to: '{report_path}'")
-    print(f"[Live Reporter] Main Live shortcut updated at: '{shortcut_path}'")
+    print(f"\n[Live Reporter] Pure Live HTML dashboard saved to single active report file: '{report_path}'")
     return report_path
 
 if __name__ == "__main__":
