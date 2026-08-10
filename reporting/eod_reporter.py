@@ -490,9 +490,11 @@ def fetch_upstox_live_trades_fallback(access_token: str) -> list:
             if s and " " in str(exit_t):
                 exit_t = str(exit_t).split(" ")[1]
 
-            gross_pnl = round((exit_p - entry_p) * qty, 2)
-            friction = round(20.0 + (gross_pnl * 0.001 if gross_pnl > 0 else 0.0), 2)
-            net_pnl = round(gross_pnl - friction, 2)
+            from reporting.friction_calculator import calculate_trade_friction
+            f_res = calculate_trade_friction(qty, entry_p, exit_p)
+            gross_pnl = f_res["gross_pnl"]
+            friction = f_res["total_friction"]
+            net_pnl = f_res["net_pnl"]
 
             # Detect Manual Exit vs Automated System Exit
             s_tag = getattr(s, "tag", None) if s and not isinstance(s, dict) else (s.get("tag") if s else None)

@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config.settings import (
     INITIAL_WALLET_CAPITAL,
-    MAX_SINGLE_LOT_PREMIUM_BUDGET,
+    MICRO_CAPITAL_BUDGET_CAP,
     TAKE_PROFIT_PCT,
     STOP_LOSS_PCT,
     TSL_STEP1_TRIGGER_PCT,
@@ -237,16 +237,11 @@ def run_dynamic_wallet_sized_6m_backtest():
                     exit_reason = "TIME_EXIT_30MIN_STAGNANT"
                     break
 
-        buy_brokerage = 20.0
-        sell_brokerage = 20.0
-        stt_sell = (exit_premium * lot_size) * 0.00125
-        stamp_duty_buy = (entry_premium * lot_size) * 0.00003
-        exchange_charges = ((entry_premium + exit_premium) * lot_size) * 0.00053
-        sebi_gst = ((entry_premium + exit_premium) * lot_size) * 0.0001
-        
-        total_friction = round(buy_brokerage + sell_brokerage + stt_sell + stamp_duty_buy + exchange_charges + sebi_gst, 2)
-        gross_pnl = round((exit_premium - entry_premium) * lot_size, 2)
-        net_pnl = round(gross_pnl - total_friction, 2)
+        from reporting.friction_calculator import calculate_trade_friction
+        f_res = calculate_trade_friction(lot_size, entry_premium, exit_premium)
+        gross_pnl = f_res["gross_pnl"]
+        total_friction = f_res["total_friction"]
+        net_pnl = f_res["net_pnl"]
 
         # Update Live Wallet Balance
         wallet += net_pnl
@@ -275,12 +270,16 @@ def run_dynamic_wallet_sized_6m_backtest():
     df_trades = pd.DataFrame(trade_log)
     
     total_trades = len(df_trades)
-    winning_trades = df_trades[df_trades["net_pnl"] > 0]
-    losing_trades = df_trades[df_trades["net_pnl"] <= 0]
+    if total_trades > 0 and "net_pnl" in df_trades.columns:
+        winning_trades = df_trades[df_trades["net_pnl"] > 0]
+        losing_trades = df_trades[df_trades["net_pnl"] <= 0]
+    else:
+        winning_trades = pd.DataFrame()
+        losing_trades = pd.DataFrame()
     
     win_rate = (len(winning_trades) / total_trades * 100.0) if total_trades > 0 else 0.0
-    gross_profit = winning_trades["net_pnl"].sum() if len(winning_trades) > 0 else 0.0
-    gross_loss = abs(losing_trades["net_pnl"].sum()) if len(losing_trades) > 0 else 0.0
+    gross_profit = winning_trades["net_pnl"].sum() if len(winning_trades) > 0 and "net_pnl" in winning_trades.columns else 0.0
+    gross_loss = abs(losing_trades["net_pnl"].sum()) if len(losing_trades) > 0 and "net_pnl" in losing_trades.columns else 0.0
     profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 999.0
 
     net_return_amt = wallet - INITIAL_WALLET_CAPITAL

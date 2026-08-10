@@ -151,6 +151,16 @@ class UpstoxOptionsTrader:
         target_price = round(entry_premium * (1.0 + TAKE_PROFIT_PCT), 2)
         initial_stop_price = round(entry_premium * (1.0 - STOP_LOSS_PCT), 2)
 
+        # Net-of-Friction Expectancy Guardrail Check
+        from reporting.friction_calculator import calculate_trade_friction
+        f_est = calculate_trade_friction(lot_size, entry_premium, target_price)
+        expected_target_net_pnl = f_est["net_pnl"]
+        min_required_net_pnl = round(f_est["total_friction"] * 1.25, 2)
+
+        if expected_target_net_pnl < min_required_net_pnl:
+            print(f"[Net Expectancy Guardrail Block] Expected Net Target PnL (Rs {expected_target_net_pnl:.2f}) < Min Friction Multiple (Rs {min_required_net_pnl:.2f}). Friction drag too high for lot size. Order aborted.")
+            return None
+
         print("=" * 75)
         print(f"  EXECUTING AGGRESSIVE LIMIT ORDER (REAL-TIME WALLET SIZED)")
         print(f"  Option Contract      : {option_symbol}")
@@ -159,6 +169,7 @@ class UpstoxOptionsTrader:
         print(f"  Aggressive Limit     : Rs {limit_price:.2f} / share")
         print(f"  Total Order Value    : Rs {entry_premium * lot_size:,.2f} INR")
         print(f"  Target (+25%) / SL   : Rs {target_price:.2f} / Rs {initial_stop_price:.2f}")
+        print(f"  Est. Roundtrip Fees  : Rs {f_est['total_friction']:.2f} INR | Net Target PnL: +Rs {expected_target_net_pnl:.2f} INR")
         print("=" * 75)
 
         # INTERACTIVE USER APPROVAL GUARDRAIL
@@ -307,26 +318,68 @@ class UpstoxOptionsTrader:
                 ticks = [(entry_premium, 300.0), (initial_stop_p, 600.0)]
             else:
                 ticks = [(entry_premium, 300.0), (round(entry_premium * 1.12, 2), 600.0), (target_p, 900.0)]
+
+            for p, elapsed_sec in ticks:
+                time.sleep(0.3)
+                is_exit, exit_p, reason = monitor.evaluate_tick(p, elapsed_sec)
+                if is_exit:
+                    exit_premium = exit_p
+                    exit_reason = reason
+                    break
         else:
-            ticks = [(entry_premium, 0.0)]
+            # LIVE PRODUCTION REAL-TIME 2-SECOND POLLING LOOP
+            print(f"[Live Position Monitor] Polling live market ticks for {option_contract['option_symbol']} every 2 seconds...")
+            start_time = time.time()
+            instrument_key = option_contract.get("instrument_key", "")
+            quote_api = upstox_client.MarketQuoteApi(self.api_client)
+            
+            while True:
+                time.sleep(2.0)
+                elapsed_sec = time.time() - start_time
+                current_ltp = entry_premium
+                
+                try:
+                    res = quote_api.get_full_market_quote(symbol=instrument_key, api_version="2.0")
+                    d_map = res.data if hasattr(res, "data") else {}
+                    q_item = list(d_map.values())[0] if d_map else None
+                    if q_item:
+                        current_ltp = float(getattr(q_item, "last_price", entry_premium))
+                except Exception as poll_err:
+                    print(f"[Live Tick Poll Warning] Could not fetch live quote: {poll_err}")
 
-        exit_premium = entry_premium
-        exit_reason = "POSITION_CLOSED"
+                is_exit, exit_p, reason = monitor.evaluate_tick(current_ltp, elapsed_sec)
+                print(f"  [Live Position Tick] LTP: Rs {current_ltp:.2f} | Elapsed: {int(elapsed_sec)}s | Trailing SL: Rs {monitor.trailing_stop_loss:.2f}")
 
-        for p, elapsed_sec in ticks:
-            time.sleep(0.3)
-            is_exit, exit_p, reason = monitor.evaluate_tick(p, elapsed_sec)
-            if is_exit:
-                exit_premium = exit_p
-                exit_reason = reason
-                break
+                if is_exit:
+                    exit_premium = exit_p
+                    exit_reason = reason
+                    print(f"\n[LIVE EXIT SIGNAL TRIGGERED] Reason: {exit_reason} | Exit LTP: Rs {exit_premium:.2f}")
+                    
+                    try:
+                        sell_body = upstox_client.PlaceOrderRequest(
+                            quantity=lot_size,
+                            product="I",
+                            validity="DAY",
+                            price=0.0,
+                            tag="OPTIONS_BOT",
+                            instrument_token=instrument_key,
+                            order_type="MARKET",
+                            transaction_type="SELL",
+                            disclosed_quantity=0,
+                            trigger_price=0.0,
+                            is_amo=False
+                        )
+                        sell_resp = self.order_api.place_order(sell_body, api_version="2.0")
+                        print(f"  [LIVE SELL ORDER DISPATCHED] Response: {sell_resp}")
+                    except Exception as sell_err:
+                        print(f"  [LIVE SELL ORDER ERROR] Could not dispatch exit order: {sell_err}")
+                    break
 
-        buy_brokerage = 20.0
-        sell_brokerage = 20.0
-        stt_sell = (exit_premium * lot_size) * 0.00125
-        exchange_fee = (entry_premium + exit_premium) * lot_size * 0.00053
-        gst = (buy_brokerage + sell_brokerage + exchange_fee) * 0.18
-        total_friction = round(buy_brokerage + sell_brokerage + stt_sell + exchange_fee + gst, 2)
+        from reporting.friction_calculator import calculate_trade_friction
+        f_res = calculate_trade_friction(lot_size, entry_premium, exit_premium)
+        gross_pnl = f_res["gross_pnl"]
+        total_friction = f_res["total_friction"]
+        net_pnl = f_res["net_pnl"]
 
         self.state_mgr.record_exit_trade(
             trade_id=trade_id,

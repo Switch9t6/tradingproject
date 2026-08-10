@@ -142,6 +142,24 @@ def send_daily_summary_alert(stats: Dict[str, Any]) -> bool:
     return send_telegram_message(msg)
 
 
+def send_telegram_error_alert(error_title: str, error_details: str, traceback_str: Optional[str] = None) -> bool:
+    """
+    Dispatches an HTML error notification to Telegram when a daemon exception or API failure occurs.
+    """
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    tb_snippet = f"\n<pre>{traceback_str[:300]}</pre>" if traceback_str else ""
+    msg = (
+        f"🚨 <b>[DAEMON SYSTEM ERROR ALERT]</b>\n"
+        f"========================================\n"
+        f"<b>Title     :</b> {error_title}\n"
+        f"<b>Time      :</b> {now_str} IST\n"
+        f"<b>Details   :</b> {error_details}"
+        f"{tb_snippet}\n"
+        f"========================================"
+    )
+    return send_telegram_message(msg)
+
+
 if __name__ == "__main__":
     _safe_print("=" * 75)
     _safe_print("      TELEGRAM NOTIFICATION MODULE DIAGNOSTIC TEST       ")

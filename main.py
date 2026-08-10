@@ -225,7 +225,11 @@ if __name__ == "__main__":
                                     auto_approve=args.auto_approve
                                 )
                 except Exception as loop_err:
-                    print(f"[Daemon Loop Warning] {loop_err}")
+                    import traceback
+                    tb = traceback.format_exc()
+                    print(f"[Daemon Loop Error] {loop_err}\n{tb}")
+                    from reporting.telegram_bot import send_telegram_error_alert
+                    send_telegram_error_alert("Daemon Loop Exception", str(loop_err), tb)
         except KeyboardInterrupt:
             print("\n[Cloud Daemon] Stopping worker process...")
 

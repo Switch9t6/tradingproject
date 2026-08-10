@@ -191,7 +191,7 @@ class StateManager:
         print(f"[State Manager] Trade #{trade_id} ({execution_mode}) recorded. DAILY LOCK ACTIVATED (MAX 1 TRADE PER DAY ENFORCED).")
         return trade_id
 
-    def record_exit_trade(self, trade_id: int, exit_premium: float, friction_fees: float, exit_reason: str):
+    def record_exit_trade(self, trade_id: int, exit_premium: float, friction_fees: float = 0.0, exit_reason: str = "EXIT"):
         self._check_date_reset()
         now_str = datetime.datetime.now().strftime("%H:%M:%S")
         
@@ -202,14 +202,17 @@ class StateManager:
         
         if row:
             quantity, entry_premium, mode = row
-            gross_pnl = (exit_premium - entry_premium) * quantity
-            net_pnl = gross_pnl - friction_fees
+            from reporting.friction_calculator import calculate_trade_friction
+            f_res = calculate_trade_friction(quantity, entry_premium, exit_premium)
+            gross_pnl = f_res["gross_pnl"]
+            calc_friction = f_res["total_friction"] if friction_fees <= 0 else friction_fees
+            net_pnl = round(gross_pnl - calc_friction, 2)
             
             cursor.execute("""
                 UPDATE trades
                 SET exit_time = ?, exit_premium = ?, gross_pnl = ?, friction_fees = ?, net_pnl = ?, status = ?, exit_reason = ?
                 WHERE id = ?
-            """, (now_str, exit_premium, gross_pnl, friction_fees, net_pnl, "CLOSED", exit_reason, trade_id))
+            """, (now_str, exit_premium, gross_pnl, calc_friction, net_pnl, "CLOSED", exit_reason, trade_id))
             conn.commit()
             
             # Settle Net PnL into Real-Time Wallet Balance
