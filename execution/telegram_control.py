@@ -89,6 +89,19 @@ def check_is_market_open() -> bool:
     return nse_open or mcx_open
 
 
+def _get_local_ip() -> str:
+    """Helper to retrieve machine's local network IP address."""
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
 def _build_action_keyboard(telebot_module):
     """Generates an interactive inline button keyboard for Telegram messages."""
     markup = telebot_module.types.InlineKeyboardMarkup(row_width=2)
@@ -544,20 +557,7 @@ def _register_handlers(bot):
             bot.reply_to(message, "✅ <b>[Dhan Access Token Updated]</b>\nNew 24-hour Dhan Access Token saved & activated successfully!", parse_mode="HTML")
             _safe_print("[Telegram Control] Dhan Access Token updated live via Telegram /settoken command.")
         except Exception as e:
-            bot.reply_to(message, f"❌ Failed to update Dhan token: {e}")
-
-def _get_local_ip() -> str:
-    """Helper to retrieve machine's local network IP address."""
-    try:
-        import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
-
+            _send_or_reply(bot, message, f"❌ Failed to update Dhan token: {e}")
 
     @bot.message_handler(commands=["report", "reports", "report_csv"])
     def cmd_report(message):
@@ -694,7 +694,7 @@ def _get_local_ip() -> str:
                     t_str = str(o.get("createTime", ""))
                     lines.append(f"• {tx} {sym} ({qty} qty) @ Rs {avg_p:.2f} [{status}] [{exch}] {t_str}")
                 lines.append("========================================")
-                bot.reply_to(message, "\n".join(lines), reply_markup=_build_action_keyboard(telebot))
+                _send_or_reply(bot, message, "\n".join(lines), reply_markup=_build_action_keyboard(telebot))
                 return
 
             # --- Fallback: StateManager local trade log ---
@@ -723,14 +723,14 @@ def _get_local_ip() -> str:
                         )
                     lines.append(f"\n========================================")
                     lines.append(f"NET DAILY PnL: {'+' if total_pnl>=0 else ''}Rs {total_pnl:,.2f} INR")
-                    bot.reply_to(message, "\n".join(lines), reply_markup=_build_action_keyboard(telebot))
+                    _send_or_reply(bot, message, "\n".join(lines), reply_markup=_build_action_keyboard(telebot))
                     return
             except Exception:
                 pass
 
-            bot.reply_to(message, "[TRADES] No live trades executed today.", reply_markup=_build_action_keyboard(telebot))
+            _send_or_reply(bot, message, "[TRADES] No live trades executed today.", reply_markup=_build_action_keyboard(telebot))
         except Exception as e:
-            bot.reply_to(message, f"[ERROR] Could not fetch trades: {e}")
+            _send_or_reply(bot, message, f"[ERROR] Could not fetch trades: {e}")
 
     @bot.message_handler(commands=["squareoff", "close", "exit"])
     def cmd_squareoff(message):
