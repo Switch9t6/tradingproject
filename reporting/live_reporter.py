@@ -449,22 +449,19 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 def extract_equity_margin(res) -> tuple[float, float]:
     """Helper to safely extract available_margin and used_margin from Upstox API response dict or object."""
     try:
-        data = res.data if hasattr(res, "data") else res
-        if isinstance(data, dict):
-            eq = data.get("equity", {})
-            if isinstance(eq, dict):
-                return float(eq.get("available_margin", 257.48)), float(eq.get("used_margin", 0.0))
-            else:
-                return float(getattr(eq, "available_margin", 257.48)), float(getattr(eq, "used_margin", 0.0))
-        elif hasattr(data, "equity"):
-            eq = getattr(data, "equity")
-            if isinstance(eq, dict):
-                return float(eq.get("available_margin", 257.48)), float(eq.get("used_margin", 0.0))
-            else:
-                return float(getattr(eq, "available_margin", 257.48)), float(getattr(eq, "used_margin", 0.0))
+        data = getattr(res, "data", res)
+        eq = data.get("equity", {}) if isinstance(data, dict) else getattr(data, "equity", {})
+        if isinstance(eq, dict):
+            avail = float(eq.get("available_margin", 1258.0))
+            used = float(eq.get("used_margin", 0.0))
+            return avail, used
+        else:
+            avail = float(getattr(eq, "available_margin", 1258.0))
+            used = float(getattr(eq, "used_margin", 0.0))
+            return avail, used
     except Exception as e:
         print(f"[Margin Parsing Exception] {e}")
-    return 257.48, 0.0
+    return 1258.0, 0.0
 
 def generate_live_market_report(date_str: str = None) -> str:
     """

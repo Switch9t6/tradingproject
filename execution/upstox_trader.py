@@ -83,11 +83,15 @@ class UpstoxOptionsTrader:
         try:
             res = self.user_api.get_user_fund_margin(api_version="2.0")
             equity_funds = INITIAL_WALLET_CAPITAL
-            if hasattr(res, "data") and res.data:
-                if isinstance(res.data, dict):
-                    equity_funds = float(res.data.get("equity", {}).get("available_margin", INITIAL_WALLET_CAPITAL))
-                elif hasattr(res.data, "equity"):
-                    equity_funds = float(getattr(res.data.equity, "available_margin", INITIAL_WALLET_CAPITAL))
+            data = getattr(res, "data", res)
+            eq = data.get("equity", {}) if isinstance(data, dict) else getattr(data, "equity", {})
+            if isinstance(eq, dict):
+                margin = eq.get("available_margin")
+            else:
+                margin = getattr(eq, "available_margin", None)
+            
+            if margin is not None and float(margin) > 0:
+                equity_funds = float(margin)
             
             # Sync Live Margin to StateManager
             self.state_mgr.state["current_wallet_balance"] = equity_funds
