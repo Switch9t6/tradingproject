@@ -14,6 +14,7 @@ from scanner.crude_news_engine import is_crude_news_blackout_window
 from scanner.smart_scanner import scan_smart_opportunities
 from execution.dhan_trader import DhanTrader, renew_dhan_access_token
 from execution.telegram_control import start_telegram_listener_background, is_bot_disabled
+from web.server import start_web_server_background
 from reporting.eod_reporter import generate_eod_report
 from config.settings import (
     INITIAL_WALLET_CAPITAL,
@@ -336,8 +337,9 @@ if __name__ == "__main__":
     is_cloud_env = args.daemon or bool(os.path.exists("/data")) or bool(os.getenv("RAILWAY_ENVIRONMENT")) or bool(os.getenv("RAILWAY_PROJECT_ID")) or bool(os.getenv("PORT"))
     is_dry_run = args.dry_run or (not args.live and not is_cloud_env)
     
-    # 1. Start Non-Blocking Telegram Control Listener
+    # 1. Start Non-Blocking Telegram Control Listener & Web Report Server
     start_telegram_listener_background()
+    start_web_server_background()
 
     # 2. Run Main Trading Pipeline for specified session
     run_daily_pipeline(

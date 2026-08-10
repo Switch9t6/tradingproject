@@ -71,7 +71,7 @@ def _build_action_keyboard(telebot_module):
     """Generates an interactive inline button keyboard for Telegram messages."""
     markup = telebot_module.types.InlineKeyboardMarkup(row_width=2)
     btn_status = telebot_module.types.InlineKeyboardButton("📊 Status", callback_data="cb_status")
-    btn_report = telebot_module.types.InlineKeyboardButton("📄 EOD Report", callback_data="cb_report")
+    btn_report = telebot_module.types.InlineKeyboardButton("📊 Performance Report", callback_data="cb_report")
     btn_trades = telebot_module.types.InlineKeyboardButton("📜 Trade Log", callback_data="cb_trades")
     btn_squareoff = telebot_module.types.InlineKeyboardButton("⚡ Square Off", callback_data="cb_squareoff")
     btn_stop = telebot_module.types.InlineKeyboardButton("🛑 Stop Engine", callback_data="cb_stop")
@@ -231,6 +231,13 @@ def start_telegram_listener_background():
     if os.getenv("TELEGRAM_LISTENER_DISABLED") == "1":
         _safe_print("[Telegram Control] Sub-process execution mode. Skipping duplicate Telegram polling listener.")
         return
+
+    # Start Interactive Report Web Server in Background
+    try:
+        from web.server import start_web_server_background
+        start_web_server_background()
+    except Exception as ws_err:
+        _safe_print(f"[Telegram Control Warning] Could not start web server: {ws_err}")
 
     if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN.startswith("your_"):
         _safe_print("[Telegram Control] TELEGRAM_BOT_TOKEN not configured. Background listener skipped.")
@@ -516,21 +523,55 @@ def _register_handlers(bot):
         except Exception as e:
             bot.reply_to(message, f"❌ Failed to update Dhan token: {e}")
 
-    @bot.message_handler(commands=["report", "reports"])
+    @bot.message_handler(commands=["report", "reports", "report_csv"])
     def cmd_report(message):
-        # /report sends the single active report file: LIVE_MARKET_REPORT.html
-        from config.settings import REPORTS_DIR
-        report_path = os.path.join(REPORTS_DIR, "LIVE_MARKET_REPORT.html")
+        # Single Unified Report Command: Returns summary text & interactive Web App URL button
+        try:
+            import secrets
+            session_token = secrets.token_urlsafe(16)
 
-        if os.path.exists(report_path):
+            railway_url = os.getenv("RAILWAY_STATIC_URL", "")
+            public_url = os.getenv("WEB_REPORT_URL", os.getenv("PUBLIC_URL", ""))
+
+            if public_url:
+                base_url = public_url.rstrip("/")
+                if not base_url.startswith("http"):
+                    base_url = f"https://{base_url}"
+            elif railway_url:
+                base_url = f"https://{railway_url.rstrip('/')}"
+            else:
+                port = os.getenv("PORT", "5000")
+                base_url = f"http://localhost:{port}"
+
+            web_app_url = f"{base_url}/report?token={session_token}"
+
             try:
-                with open(report_path, "rb") as doc:
-                    bot.send_document(message.chat.id, doc, caption="[LIVE MARKET REPORT] LIVE_MARKET_REPORT.html", reply_markup=_build_action_keyboard(telebot))
-                _safe_print("[Telegram Control] Live report sent: LIVE_MARKET_REPORT.html")
-            except Exception as e:
-                bot.reply_to(message, f"[ERROR] Failed to send report: {e}")
-        else:
-            bot.reply_to(message, "[NO REPORTS] LIVE_MARKET_REPORT.html not found yet.", reply_markup=_build_action_keyboard(telebot))
+                from reports.trade_report import get_trade_report_data
+                data = get_trade_report_data()
+                net_pnl = data["net_pnl"]
+                pnl_str = f"+Rs {net_pnl:,.2f}" if net_pnl >= 0 else f"-Rs {abs(net_pnl):,.2f}"
+
+                msg_text = (
+                    "📊 <b>[QUANT PERFORMANCE REPORT DASHBOARD]</b>\n"
+                    "========================================\n"
+                    f"<b>Today's Trades  :</b> {data['total_trades']} (NSE: {data['nse_trades']} | MCX: {data['mcx_trades']})\n"
+                    f"<b>Win Rate        :</b> {data['win_rate']}%\n"
+                    f"<b>Net Realized PnL:</b> <code>{pnl_str} INR</code>\n"
+                    f"<b>Max Drawdown    :</b> {data['max_drawdown_pct']}%\n"
+                    "========================================\n"
+                    "Tap below to open the interactive performance web dashboard or download custom date range PDFs:"
+                )
+            except Exception:
+                msg_text = "📊 <b>[QUANT PERFORMANCE REPORT DASHBOARD]</b>\nTap below to open the interactive performance web dashboard:"
+
+            markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+            btn_web = telebot.types.InlineKeyboardButton("📊 Open Interactive Performance Report", url=web_app_url)
+            markup.add(btn_web)
+
+            bot.reply_to(message, msg_text, parse_mode="HTML", reply_markup=markup)
+            _safe_print(f"[Telegram Control] Sent interactive report URL: {web_app_url}")
+        except Exception as e:
+            bot.reply_to(message, f"❌ Failed to generate report link: {e}")
 
     @bot.message_handler(commands=["trades"])
     def cmd_trades(message):
@@ -703,54 +744,6 @@ def is_bot_disabled() -> bool:
     return os.path.exists(BOT_DISABLED_FLAG)
 
 
-def start_telegram_listener_background():
-    """
-    Starts the Telegram bot polling in a non-blocking background thread.
-    Safe to call multiple times -- only the first call starts the listener.
-    """
-    global _listener_started
-
-    if _listener_started:
-        return
-
-    if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN.startswith("your_"):
-        _safe_print("[Telegram Control] TELEGRAM_BOT_TOKEN not configured. Background listener skipped.")
-        return
-
-    bot = _get_bot()
-    if bot is None:
-        return
-
-    def _polling_loop():
-        _safe_print("[Telegram Control] Cloud polling listener started. Listening 24/7 for /start, /status, /report, /reports, /trades, /stop, /resume...")
-        import time
-        try:
-            bot.remove_webhook()
-            bot.delete_webhook(drop_pending_updates=True)
-        except Exception:
-            pass
-
-        consecutive_409 = 0
-        while True:
-            try:
-                bot.infinity_polling(timeout=30, long_polling_timeout=20, skip_pending=True)
-                consecutive_409 = 0
-            except Exception as e:
-                err_str = str(e)
-                if "409" in err_str or "Conflict" in err_str:
-                    consecutive_409 += 1
-                    if consecutive_409 == 1:
-                        _safe_print("[Telegram Control] 409 Conflict (previous process shutting down). Auto-retrying in background...")
-                    time.sleep(10)
-                else:
-                    consecutive_409 = 0
-                    _safe_print(f"[Telegram Control Warning] Polling glitch: {e}. Auto-reconnecting in 5s...")
-                    time.sleep(5)
-
-    t = threading.Thread(target=_polling_loop, daemon=True)
-    t.start()
-    _listener_started = True
-    _safe_print("[Telegram Control] Background listener thread launched successfully.")
 
 
 if __name__ == "__main__":

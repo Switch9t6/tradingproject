@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading System Performance Dashboard</title>
+    <!-- Modern Font Inter & Font Awesome Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js CDN for Dynamic Charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0b0f19;
+            --bg-secondary: #111827;
+            --bg-card: rgba(17, 24, 39, 0.7);
+            --border-card: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-blue: #38bdf8;
+            --accent-green: #22c55e;
+            --accent-red: #ef4444;
+            --accent-amber: #f59e0b;
+            --accent-purple: #a855f7;
+            --badge-bg: rgba(56, 189, 248, 0.12);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 24px 16px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1280px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Glassmorphism Header */
+        .header {
+            background: var(--bg-card);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-card);
+            border-radius: 16px;
+            padding: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .header-title h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #ffffff 0%, #94a3b8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-title p {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin-top: 4px;
+        }
+
+        .header-badges {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .badge {
+            padding: 6px 14px;
+            border-radius: 30px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .badge-live {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--accent-green);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .badge-dhan {
+            background: rgba(56, 189, 248, 0.15);
+            color: var(--accent-blue);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+        }
+
+        /* Controls Section */
+        .controls-card {
+            background: var(--bg-card);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-card);
+            border-radius: 16px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .controls-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .quick-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .btn-quick {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-card);
+            color: var(--text-secondary);
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-quick:hover, .btn-quick.active {
+            background: var(--accent-blue);
+            color: #000;
+            border-color: var(--accent-blue);
+            font-weight: 600;
+        }
+
+        .date-inputs {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .date-field {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-card);
+            padding: 6px 12px;
+            border-radius: 8px;
+        }
+
+        .date-field label {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+        }
+
+        .date-field input[type="date"] {
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .btn-action {
+            padding: 9px 18px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .btn-fetch {
+            background: linear-gradient(135deg, var(--accent-blue) 0%, #0284c7 100%);
+            color: #fff;
+        }
+
+        .btn-fetch:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .btn-pdf {
+            background: linear-gradient(135deg, var(--accent-purple) 0%, #7c3aed 100%);
+            color: #fff;
+        }
+
+        .btn-pdf:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        /* Error Notification Banner */
+        .error-banner {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            color: var(--accent-red);
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            display: none;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Metrics Cards Grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .metric-card {
+            background: var(--bg-card);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-card);
+            border-radius: 14px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: var(--accent-blue);
+        }
+
+        .metric-card.green::before { background: var(--accent-green); }
+        .metric-card.red::before { background: var(--accent-red); }
+        .metric-card.amber::before { background: var(--accent-amber); }
+        .metric-card.purple::before { background: var(--accent-purple); }
+
+        .metric-label {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+        }
+
+        .metric-val {
+            font-size: 1.4rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .metric-sub {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+        }
+
+        /* Charts & Analytics Section */
+        .analytics-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 16px;
+        }
+
+        @media (max-width: 900px) {
+            .analytics-row { grid-template-columns: 1fr; }
+        }
+
+        .chart-card {
+            background: var(--bg-card);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-card);
+            border-radius: 14px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .chart-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 220px;
+            width: 100%;
+        }
+
+        /* Data Table Styling */
+        .table-card {
+            background: var(--bg-card);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-card);
+            border-radius: 14px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .table-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .search-input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-card);
+            padding: 6px 12px;
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 0.82rem;
+            outline: none;
+            width: 220px;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.83rem;
+        }
+
+        th {
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-secondary);
+            font-weight: 600;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border-card);
+            text-transform: uppercase;
+            font-size: 0.72rem;
+            letter-spacing: 0.05em;
+        }
+
+        td {
+            padding: 12px 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            color: var(--text-primary);
+            white-space: nowrap;
+        }
+
+        tr:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .tag {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.72rem;
+            font-weight: 600;
+        }
+
+        .tag-nse { background: rgba(56, 189, 248, 0.15); color: var(--accent-blue); }
+        .tag-mcx { background: rgba(168, 85, 247, 0.15); color: var(--accent-purple); }
+
+        .text-green { color: var(--accent-green); font-weight: 600; }
+        .text-red { color: var(--accent-red); font-weight: 600; }
+
+        .empty-state {
+            text-align: center;
+            padding: 30px;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Header -->
+    <div class="header">
+        <div class="header-title">
+            <h1><i class="fa-solid font-awesome fa-chart-line" style="color: var(--accent-blue);"></i> QUANTITATIVE SYSTEM PERFORMANCE REPORT</h1>
+            <p>Interactive Dual-Session Market Performance & PnL Analytics</p>
+        </div>
+        <div class="header-badges">
+            <span class="badge badge-dhan"><i class="fa-solid fa-link"></i> DHANHQ LIVE SYNCED</span>
+            <span class="badge badge-live"><i class="fa-solid fa-circle" style="font-size: 8px;"></i> LIVE SYSTEM</span>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls-card">
+        <div class="controls-row">
+            <div class="quick-buttons">
+                <button class="btn-quick active" onclick="setQuickRange('today')">Today</button>
+                <button class="btn-quick" onclick="setQuickRange('7d')">Last 7 Days</button>
+                <button class="btn-quick" onclick="setQuickRange('30d')">Last 30 Days</button>
+                <button class="btn-quick" onclick="setQuickRange('ytd')">Year-To-Date</button>
+            </div>
+
+            <div class="date-inputs">
+                <div class="date-field">
+                    <label>Start:</label>
+                    <input type="date" id="startDate">
+                </div>
+                <div class="date-field">
+                    <label>End:</label>
+                    <input type="date" id="endDate">
+                </div>
+                <button class="btn-action btn-fetch" onclick="fetchReportData()">
+                    <i class="fa-solid fa-rotate"></i> Update Report
+                </button>
+                <button class="btn-action btn-pdf" onclick="downloadPdf()">
+                    <i class="fa-solid fa-file-pdf"></i> Download PDF
+                </button>
+            </div>
+        </div>
+
+        <div class="error-banner" id="errorBanner">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <span id="errorMessage">Date range error message</span>
+        </div>
+    </div>
+
+    <!-- Metrics Grid -->
+    <div class="metrics-grid">
+        <div class="metric-card green" id="cardNetPnl">
+            <div class="metric-label">Net Realized PnL</div>
+            <div class="metric-val text-green" id="valNetPnl">Rs 0.00</div>
+            <div class="metric-sub" id="subNetPnl">Gross: Rs 0.00 | Fees: Rs 0.00</div>
+        </div>
+
+        <div class="metric-card blue">
+            <div class="metric-label">Win Rate %</div>
+            <div class="metric-val" id="valWinRate">0.0%</div>
+            <div class="metric-sub" id="subWinRecord">0 Wins / 0 Losses</div>
+        </div>
+
+        <div class="metric-card amber">
+            <div class="metric-label">Max Drawdown</div>
+            <div class="metric-val" id="valMaxDrawdown">0.00%</div>
+            <div class="metric-sub" id="subMaxDrawdown">Rs 0.00 Drop</div>
+        </div>
+
+        <div class="metric-card purple">
+            <div class="metric-label">Session Breakdown</div>
+            <div class="metric-val" id="valTotalTrades">0 Trades</div>
+            <div class="metric-sub" id="subSessions">NSE: 0 | MCX: 0</div>
+        </div>
+    </div>
+
+    <!-- Analytics Charts -->
+    <div class="analytics-row">
+        <div class="chart-card">
+            <div class="chart-title">
+                <span><i class="fa-solid fa-chart-area" style="color: var(--accent-blue);"></i> Cumulative Equity Curve (INR)</span>
+            </div>
+            <div class="chart-container">
+                <canvas id="equityChart"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <div class="chart-title">
+                <span><i class="fa-solid fa-chart-pie" style="color: var(--accent-purple);"></i> Session Volume & Win Share</span>
+            </div>
+            <div class="chart-container">
+                <canvas id="winPieChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Itemized Trade Table -->
+    <div class="table-card">
+        <div class="table-header">
+            <div class="table-title">
+                <i class="fa-solid fa-list-check" style="color: var(--accent-blue);"></i> Itemized Trade Execution Log
+            </div>
+            <input type="text" class="search-input" id="tableSearch" placeholder="🔍 Search symbol, reason..." onkeyup="filterTable()">
+        </div>
+
+        <div class="table-wrapper">
+            <table id="tradesTable">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Date & Time</th>
+                        <th>Option Contract</th>
+                        <th>Session</th>
+                        <th>Qty</th>
+                        <th>Entry Rs</th>
+                        <th>Exit Rs</th>
+                        <th>Exit Reason</th>
+                        <th>Net PnL (INR)</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <tr>
+                        <td colspan="9" class="empty-state">Loading report data...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    let equityChartInstance = null;
+    let winPieChartInstance = null;
+    let rawTradesData = [];
+
+    // Helper to format ISO date to YYYY-MM-DD
+    function formatDate(d) {
+        return d.toISOString().split('T')[0];
+    }
+
+    // Set Default Dates to Today on load
+    window.addEventListener('DOMContentLoaded', () => {
+        const today = new Date();
+        document.getElementById('startDate').value = formatDate(today);
+        document.getElementById('endDate').value = formatDate(today);
+        fetchReportData();
+    });
+
+    // Quick Date Selection Buttons
+    function setQuickRange(type) {
+        document.querySelectorAll('.btn-quick').forEach(b => b.classList.remove('active'));
+        event.target.classList.add('active');
+
+        const end = new Date();
+        let start = new Date();
+
+        if (type === 'today') {
+            start = new Date();
+        } else if (type === '7d') {
+            start.setDate(end.getDate() - 6);
+        } else if (type === '30d') {
+            start.setDate(end.getDate() - 29);
+        } else if (type === 'ytd') {
+            start = new Date(end.getFullYear(), 0, 1);
+        }
+
+        document.getElementById('startDate').value = formatDate(start);
+        document.getElementById('endDate').value = formatDate(end);
+
+        fetchReportData();
+    }
+
+    // Client-side Guardrails Validation
+    function validateDates(sStr, eStr) {
+        const s = new Date(sStr);
+        const e = new Date(eStr);
+        const errBanner = document.getElementById('errorBanner');
+        const errText = document.getElementById('errorMessage');
+
+        if (!sStr || !eStr || isNaN(s.getTime()) || isNaN(e.getTime())) {
+            errText.innerText = "Please select valid start and end dates.";
+            errBanner.style.display = 'flex';
+            return false;
+        }
+
+        if (e < s) {
+            errText.innerText = "End date cannot be earlier than start date.";
+            errBanner.style.display = 'flex';
+            return false;
+        }
+
+        const diffDays = Math.ceil((e - s) / (1000 * 60 * 60 * 24)) + 1;
+        if (diffDays > 365) {
+            errText.innerText = "Maximum date range limit is 1 year (365 days). Current selected range is " + diffDays + " days.";
+            errBanner.style.display = 'flex';
+            return false;
+        }
+
+        errBanner.style.display = 'none';
+        return true;
+    }
+
+    // AJAX Fetch Performance Report Data
+    async function fetchReportData() {
+        const start = document.getElementById('startDate').value;
+        const end = document.getElementById('endDate').value;
+
+        if (!validateDates(start, end)) return;
+
+        try {
+            const resp = await fetch(`/api/report_data?start_date=${start}&end_date=${end}`);
+            const data = await resp.json();
+
+            if (!resp.ok) {
+                document.getElementById('errorMessage').innerText = data.error || "Failed to fetch report data.";
+                document.getElementById('errorBanner').style.display = 'flex';
+                return;
+            }
+
+            renderDashboard(data);
+        } catch (err) {
+            console.error(err);
+            document.getElementById('errorMessage').innerText = "Network error connecting to report server.";
+            document.getElementById('errorBanner').style.display = 'flex';
+        }
+    }
+
+    // Render Metrics, Charts, & Table
+    function renderDashboard(data) {
+        rawTradesData = data.itemized_trades || [];
+
+        // 1. Metrics Cards
+        const netPnl = data.net_pnl;
+        const valNetPnl = document.getElementById('valNetPnl');
+        valNetPnl.innerText = (netPnl >= 0 ? '+Rs ' : '-Rs ') + Math.abs(netPnl).toFixed(2) + ' INR';
+        valNetPnl.className = 'metric-val ' + (netPnl >= 0 ? 'text-green' : 'text-red');
+        document.getElementById('cardNetPnl').className = 'metric-card ' + (netPnl >= 0 ? 'green' : 'red');
+        document.getElementById('subNetPnl').innerText = `Gross: Rs ${data.gross_pnl.toFixed(2)} | Fees: Rs ${data.total_friction.toFixed(2)}`;
+
+        document.getElementById('valWinRate').innerText = data.win_rate.toFixed(1) + '%';
+        document.getElementById('subWinRecord').innerText = `${data.winning_trades} Wins / ${data.losing_trades} Losses`;
+
+        document.getElementById('valMaxDrawdown').innerText = data.max_drawdown_pct.toFixed(2) + '%';
+        document.getElementById('subMaxDrawdown').innerText = `Rs ${data.max_drawdown_inr.toFixed(2)} Drop`;
+
+        document.getElementById('valTotalTrades').innerText = `${data.total_trades} Trades`;
+        document.getElementById('subSessions').innerText = `NSE: ${data.nse_trades} | MCX: ${data.mcx_trades}`;
+
+        // 2. Render Table
+        renderTable(rawTradesData);
+
+        // 3. Render Charts
+        renderEquityChart(rawTradesData, data.initial_capital);
+        renderWinPieChart(data);
+    }
+
+    // Render Table Rows
+    function renderTable(trades) {
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = '';
+
+        if (!trades || trades.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No executed trades found in selected date range.</td></tr>';
+            return;
+        }
+
+        trades.forEach(t => {
+            const tr = document.createElement('tr');
+            const pnlClass = t.net_pnl >= 0 ? 'text-green' : 'text-red';
+            const pnlSign = t.net_pnl >= 0 ? '+' : '';
+            const tagClass = t.exchange === 'MCX_FO' ? 'tag-mcx' : 'tag-nse';
+
+            tr.innerHTML = `
+                <td>${t.id}</td>
+                <td>${t.trade_date}<br/><span style="color: var(--text-secondary); font-size: 0.75rem;">${t.entry_time}</span></td>
+                <td><strong>${t.option_symbol}</strong></td>
+                <td><span class="tag ${tagClass}">${t.exchange}</span></td>
+                <td>${t.quantity}</td>
+                <td>Rs ${t.entry_premium.toFixed(2)}</td>
+                <td>Rs ${t.exit_premium.toFixed(2)}</td>
+                <td>${t.exit_reason}</td>
+                <td class="${pnlClass}">${pnlSign}Rs ${t.net_pnl.toFixed(2)}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    // Search Table Filter
+    function filterTable() {
+        const query = document.getElementById('tableSearch').value.toLowerCase();
+        const filtered = rawTradesData.filter(t => 
+            t.option_symbol.toLowerCase().includes(query) ||
+            t.exit_reason.toLowerCase().includes(query) ||
+            t.exchange.toLowerCase().includes(query) ||
+            t.trade_date.includes(query)
+        );
+        renderTable(filtered);
+    }
+
+    // Render Cumulative Equity Curve
+    function renderEquityChart(trades, initialCapital) {
+        const ctx = document.getElementById('equityChart').getContext('2d');
+        if (equityChartInstance) equityChartInstance.destroy();
+
+        let labels = ['Start'];
+        let curve = [initialCapital];
+        let cumPnl = initialCapital;
+
+        trades.forEach((t, i) => {
+            cumPnl += t.net_pnl;
+            labels.push(`Trade #${i+1}`);
+            curve.push(cumPnl);
+        });
+
+        equityChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Equity (INR)',
+                    data: curve,
+                    borderColor: '#38bdf8',
+                    backgroundColor: 'rgba(56, 189, 248, 0.08)',
+                    fill: true,
+                    tension: 0.3,
+                    borderWidth: 2,
+                    pointRadius: 3,
+                    pointHoverRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { color: 'rgba(255, 255, 255, 0.04)' }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+                    y: { grid: { color: 'rgba(255, 255, 255, 0.04)' }, ticks: { color: '#94a3b8', font: { size: 10 } } }
+                }
+            }
+        });
+    }
+
+    // Render Pie Chart
+    function renderWinPieChart(data) {
+        const ctx = document.getElementById('winPieChart').getContext('2d');
+        if (winPieChartInstance) winPieChartInstance.destroy();
+
+        winPieChartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Winning Trades', 'Losing Trades', 'Breakeven'],
+                datasets: [{
+                    data: [data.winning_trades, data.losing_trades, data.breakeven_trades],
+                    backgroundColor: ['#22c55e', '#ef4444', '#f59e0b'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 11 } } }
+                },
+                cutout: '70%'
+            }
+        });
+    }
+
+    // Download PDF Action
+    function downloadPdf() {
+        const start = document.getElementById('startDate').value;
+        const end = document.getElementById('endDate').value;
+
+        if (!validateDates(start, end)) return;
+
+        window.location.href = `/download-report-pdf?start_date=${start}&end_date=${end}`;
+    }
+</script>
+
+</body>
+</html>
