@@ -232,6 +232,22 @@ def _register_handlers(bot):
     """Register all Telegram command handlers and inline button callbacks on the bot instance."""
     import telebot
 
+    @bot.message_handler(commands=["help"])
+    def cmd_help(message):
+        help_msg = (
+            "🤖 <b>[QUANT TRADING BOT COMMANDS]</b>\n"
+            "========================================\n"
+            "📊 <b>/status</b> - Current system status & wallet balance\n"
+            "📄 <b>/report</b> - Download live EOD market report\n"
+            "📜 <b>/trades</b> - View today's trade execution log\n"
+            "⚡ <b>/squareoff</b> - Emergency manual square-off open position\n"
+            "🛑 <b>/stop</b> - Activate remote kill switch (Pause trading)\n"
+            "✅ <b>/resume</b> - Resume automated scanner & trading\n"
+            "❓ <b>/help</b> - Show this help menu\n"
+            "========================================"
+        )
+        bot.reply_to(message, help_msg, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
+
     @bot.message_handler(commands=["start"])
     def cmd_start(message):
         if not check_is_market_open():

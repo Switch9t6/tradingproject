@@ -75,9 +75,9 @@ def check_market_hours_and_calendar(session: str = "nse") -> bool:
         return False
 
     if session.lower() == "mcx":
-        in_window = (datetime.time(17, 0) <= current_time <= datetime.time(23, 15))
+        in_window = (datetime.time(17, 0) <= current_time <= datetime.time(23, 30))
         if not in_window:
-            print(f"\n[MCX SESSION LOCKOUT] {time_str} IST is outside Session 2 MCX Trading Window (17:00 - 23:15 IST).")
+            print(f"\n[MCX SESSION LOCKOUT] {time_str} IST is outside Session 2 MCX Trading Window (17:00 - 23:30 IST).")
             return False
         return True
     else:

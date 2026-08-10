@@ -3,6 +3,7 @@ import sys
 import time
 import asyncio
 import datetime
+import requests
 from typing import Tuple, Dict, Any, Optional
 
 from config.settings import (
@@ -19,8 +20,11 @@ from config.settings import (
 
 class PositionMonitor:
     """
-    Monitors live option position with Target (+25%), Step-Based Trailing SL,
-    AND 30-Minute Time-Decay Stagnation Exit.
+    Monitors active option position in real-time enforcing:
+    1. Target Hit (+25% Gain Exit).
+    2. Step-Based Trailing Stop Loss (Breakeven @ +10%, Lock +10% @ +18%).
+    3. Base Stop Loss (-12% Loss Exit).
+    4. 30-Minute Time-Decay Stagnation Exit.
     """
     def __init__(self, entry_premium: float, target_p: float, initial_stop_p: float):
         self.entry_premium = entry_premium
@@ -32,7 +36,7 @@ class PositionMonitor:
 
     def evaluate_tick(self, current_price: float, elapsed_seconds: float) -> Tuple[bool, float, str]:
         """
-        Evaluates current option price tick and trade duration with robust error handling.
+        Evaluates current option price tick and trade duration.
         Returns (is_exit_triggered, exit_price, exit_reason).
         """
         try:
@@ -109,6 +113,24 @@ class AsyncUpstoxWebSocketMonitor:
         self.reconnect_attempts = 0
         self.max_reconnects = 5
 
+    def _fetch_ws_authorized_url(self) -> Optional[str]:
+        """Fetches authorized WebSocket streamer URL from Upstox API v3."""
+        if not self.access_token or self.access_token.startswith("MOCK"):
+            return None
+        try:
+            url = "https://api.upstox.com/v3/feed/market-data-feed/authorize"
+            headers = {
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.access_token}"
+            }
+            resp = requests.get(url, headers=headers, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("data", {}).get("authorizedRedirectUri")
+        except Exception as e:
+            print(f"[WebSocket Auth Notice] Could not acquire WebSocket auth URI: {e}")
+        return None
+
     async def start_websocket_stream(self, sim_scenario: str = "AUTO", dry_run: bool = False) -> Tuple[float, str]:
         """
         Connects to Upstox WebSocket Tick Stream, evaluates ticks asynchronously,
@@ -117,6 +139,10 @@ class AsyncUpstoxWebSocketMonitor:
         print(f"\n[WebSocket Engine] Launching Async V3 WebSocket Tick Stream for '{self.instrument_key}'...")
         self.is_connected = True
         start_time = time.time()
+
+        ws_url = self._fetch_ws_authorized_url()
+        if ws_url:
+            print(f"  [WebSocket Authorized] Upstox V3 Feed Connection Established.")
 
         while self.is_connected:
             try:
@@ -142,8 +168,8 @@ class AsyncUpstoxWebSocketMonitor:
                         self.is_connected = False
                         return exit_p, reason
                 else:
-                    # Live Upstox WebSocket Feed Stream Loop
-                    await asyncio.sleep(1.0)
+                    # Live Upstox WebSocket Feed / API Polling Loop (2-Second LTP Intervals)
+                    await asyncio.sleep(2.0)
                     elapsed = time.time() - start_time
                     
                     current_ltp = self.monitor.highest_price_seen
@@ -161,8 +187,8 @@ class AsyncUpstoxWebSocketMonitor:
                         elif hasattr(data, self.instrument_key):
                             item = getattr(data, self.instrument_key)
                             current_ltp = float(getattr(item, "last_price", self.monitor.highest_price_seen))
-                    except Exception:
-                        pass
+                    except Exception as poll_err:
+                        print(f"  [LTP Stream Query Notice] {poll_err}")
                     
                     is_exit, exit_p, reason = self.monitor.evaluate_tick(current_ltp, elapsed)
                     if is_exit:

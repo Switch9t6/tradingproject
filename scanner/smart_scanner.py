@@ -46,8 +46,8 @@ def detect_active_session(dt: Optional[datetime.datetime] = None) -> str:
     if datetime.time(9, 15) <= current_time <= datetime.time(15, 30):
         return "NSE_EQUITY"
         
-    # Session 2 (MCX Commodity Window: 05:00 PM to 11:15 PM IST)
-    if datetime.time(17, 0) <= current_time <= datetime.time(23, 15):
+    # Session 2 (MCX Commodity Window: 05:00 PM to 11:30 PM IST)
+    if datetime.time(17, 0) <= current_time <= datetime.time(23, 30):
         return "MCX_COMMODITY"
 
     return "STANDBY"
