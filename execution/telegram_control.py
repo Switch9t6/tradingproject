@@ -303,13 +303,19 @@ def _register_handlers(bot):
 
         def _run_pipeline_job():
             try:
-                cmd = [sys.executable, "main.py", "--live"]
+                cmd = [sys.executable, "main.py", "--live", "--auto-approve"]
                 _safe_print(f"[Telegram Control] Executing command via /start: {' '.join(cmd)}")
                 env = os.environ.copy()
                 env["TELEGRAM_LISTENER_DISABLED"] = "1"
                 proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                 out, _ = proc.communicate(timeout=180)
                 _safe_print(f"[Telegram Control Output]\n{out[-500:] if out else 'No output'}")
+                if out and ("LIVE LIMIT ORDER PLACED" in out or "CLOSED" in out or "EXECUTED" in out or "TARGET HIT" in out):
+                    bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[PIPELINE EXECUTED SUCCESSFULLY]</b>\n\n<pre>{out[-600:]}</pre>", parse_mode="HTML")
+                elif out and "UDAPI1154" in out:
+                    bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[UPSTOX IP RESTRICTION]</b>\nUpstox blocked local origin IP (UDAPI1154). Order execution must run on Railway cloud.", parse_mode="HTML")
+                elif out and "Session lock" in out:
+                    bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[SESSION LOCK]</b> Session trade cap reached for today.", parse_mode="HTML")
             except Exception as ex:
                 _safe_print(f"[Telegram Control Run Error] {ex}")
 
@@ -327,7 +333,7 @@ def _register_handlers(bot):
             "[UPSTOX LIVE ALGORITHMIC ENGINE]\n"
             "-------------------------------------------\n"
             "Available Commands:\n"
-            "/start   - Launch live trading pipeline ('python main.py --live')\n"
+            "/start   - Launch live trading pipeline ('python main.py --live --auto-approve')\n"
             "/status  - Live Wallet Balance & Bot Health\n"
             "/report  - Download today's Live EOD HTML report\n"
             "/trades  - View today's executed trade log\n"
@@ -374,13 +380,19 @@ def _register_handlers(bot):
 
             def _run_resume_job():
                 try:
-                    cmd = [sys.executable, "main.py", "--live"]
+                    cmd = [sys.executable, "main.py", "--live", "--auto-approve"]
                     _safe_print(f"[Telegram Control] Executing pipeline scan via /resume: {' '.join(cmd)}")
                     env = os.environ.copy()
                     env["TELEGRAM_LISTENER_DISABLED"] = "1"
                     proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                     out, _ = proc.communicate(timeout=180)
                     _safe_print(f"[Telegram Control Output]\n{out[-500:] if out else 'No output'}")
+                    if out and ("LIVE LIMIT ORDER PLACED" in out or "CLOSED" in out or "EXECUTED" in out or "TARGET HIT" in out):
+                        bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[PIPELINE EXECUTED SUCCESSFULLY]</b>\n\n<pre>{out[-600:]}</pre>", parse_mode="HTML")
+                    elif out and "UDAPI1154" in out:
+                        bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[UPSTOX IP RESTRICTION]</b>\nUpstox blocked local origin IP (UDAPI1154). Order execution must run on Railway cloud.", parse_mode="HTML")
+                    elif out and "Session lock" in out:
+                        bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[SESSION LOCK]</b> Session trade cap reached for today.", parse_mode="HTML")
                 except Exception as ex:
                     _safe_print(f"[Telegram Control Run Error] {ex}")
 
