@@ -340,17 +340,18 @@ class DhanTrader:
                     print(f"[Live Quote Warning] Could not fetch real quote: {q_err}. Using estimated Rs {real_ask_price:.2f}.")
 
                 # -------------------------------------------------------
-                # 3b. Place MARKET Order (fills at best available price)
+                # 3b. Place Aggressive LIMIT Order (NSE F&O options require LIMIT orders)
                 # -------------------------------------------------------
-                print(f"\n[DHAN LIVE ORDER] Placing MARKET order: {sec_id} on {dhan_exch_seg} | Qty: {lot_size}")
+                order_price = round(real_ask_price if real_ask_price > 0 else limit_price, 2)
+                print(f"\n[DHAN LIVE ORDER] Placing Aggressive LIMIT order: {sec_id} on {dhan_exch_seg} | Qty: {lot_size} | Price: Rs {order_price:.2f}")
                 api_resp = self.dhan.place_order(
                     security_id=sec_id,
                     exchange_segment=dhan_exch_seg,
                     transaction_type="BUY",
                     quantity=lot_size,
-                    order_type="MARKET",
+                    order_type="LIMIT",
                     product_type="INTRADAY",
-                    price=0,
+                    price=order_price,
                     validity="DAY"
                 )
 
