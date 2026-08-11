@@ -348,7 +348,7 @@ def _register_handlers(bot):
 
         def _run_pipeline_job():
             try:
-                cmd = [sys.executable, "main.py", "--live", "--auto-approve", "--micro-capital", "--override-daily-limit"]
+                cmd = [sys.executable, "main.py", "--live", "--auto-approve", "--override-daily-limit"]
                 _safe_print(f"[Telegram Control] Executing command via /start: {' '.join(cmd)}")
                 env = os.environ.copy()
                 env["TELEGRAM_LISTENER_DISABLED"] = "1"
@@ -428,7 +428,7 @@ def _register_handlers(bot):
 
             def _run_resume_job():
                 try:
-                    cmd = [sys.executable, "main.py", "--live", "--auto-approve", "--micro-capital", "--override-daily-limit"]
+                    cmd = [sys.executable, "main.py", "--live", "--auto-approve", "--override-daily-limit"]
                     _safe_print(f"[Telegram Control] Executing pipeline scan via /resume: {' '.join(cmd)}")
                     env = os.environ.copy()
                     env["TELEGRAM_LISTENER_DISABLED"] = "1"
