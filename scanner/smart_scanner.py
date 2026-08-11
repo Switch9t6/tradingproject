@@ -101,14 +101,14 @@ def scan_nse_equities_and_indices(
 
     print(f"[Engine A] Scanned Candidate Universe ({len(scoped_universe)} stocks): {scoped_universe[:8]}...")
 
-    best_candidate = None
-    highest_score = 0.0
+    qualified_candidates = []
 
-    # Simulate / Ingest live candle stream for top candidate
+    # Simulate / Ingest live candle stream for candidates
     for symbol in scoped_universe:
         np.random.seed(abs(hash(symbol)) % 10000)
 
-        spot_price = float(np.random.uniform(200.0, 1800.0))
+        is_index_asset = symbol in ["NIFTY", "MIDCPNIFTY", "FINNIFTY", "BANKNIFTY"]
+        spot_price = float(np.random.uniform(23000.0, 24800.0)) if is_index_asset else float(np.random.uniform(200.0, 1800.0))
         vol_surge_ratio = float(np.random.uniform(1.2, 3.8))
         rs_rating = float(np.random.uniform(55.0, 92.0))
         vwap_val = spot_price * float(np.random.uniform(0.992, 0.998))
@@ -131,18 +131,20 @@ def scan_nse_equities_and_indices(
 
         composite_score = round(vol_score + rs_score + tech_align_score + sent_score, 2)
 
-        if composite_score > highest_score and is_aligned and vol_surge_ratio >= 2.0:
-            highest_score = composite_score
-            best_candidate = {
+        if composite_score >= 75.0 and is_aligned and vol_surge_ratio >= 2.0:
+            lot_size = 25 if symbol == "NIFTY" else (50 if symbol == "MIDCPNIFTY" else (25 if symbol == "FINNIFTY" else (15 if symbol == "BANKNIFTY" else (2925 if spot_price < 300 else 1250))))
+            strike_step = 50.0 if symbol in ["NIFTY", "FINNIFTY"] else (25.0 if symbol == "MIDCPNIFTY" else (100.0 if symbol == "BANKNIFTY" else (2.5 if spot_price < 300 else 5.0)))
+
+            cand = {
                 "symbol": symbol,
                 "exchange": "NSE_FO",
-                "instrument_key": f"NSE_FO|{symbol}",
+                "instrument_key": f"NSE_INDEX|{symbol}" if is_index_asset else f"NSE_FO|{symbol}",
                 "spot_price": round(spot_price, 2),
                 "direction": "BULLISH",
                 "option_type": "CE",
-                "strike_interval": 2.5 if spot_price < 300 else (5.0 if spot_price < 1000 else 10.0),
-                "lot_size": 2925 if spot_price < 300 else 1250,
-                "is_index": False,
+                "strike_interval": strike_step,
+                "lot_size": lot_size,
+                "is_index": is_index_asset,
                 "is_mcx": False,
                 "session": "NSE Equity Morning Session",
                 "breakout_reason": f"Volume Surge ({vol_surge_ratio:.2f}x SMA) + RS Rating ({rs_rating:.1f}) + VWAP/9-EMA Alignment",
@@ -159,13 +161,30 @@ def scan_nse_equities_and_indices(
                     "news_score": sent_score
                 }
             }
+            qualified_candidates.append(cand)
 
-    if best_candidate and highest_score >= 75.0:
+    # Sort qualified candidates by score
+    qualified_candidates.sort(key=lambda x: x["composite_rating"]["composite_score"], reverse=True)
+
+    if micro_capital:
+        # Under micro-capital mode, prioritize candidates whose option cost fits within max budget
+        for cand in qualified_candidates:
+            if cand["is_index"]:
+                best_candidate = cand
+                highest_score = cand["composite_rating"]["composite_score"]
+                print(f"\n[ENGINE A SIGNAL QUALIFIED - MICRO CAPITAL INDEX OPTION]")
+                print(f"  Top Index Candidate  : {best_candidate['symbol']} | Composite Score: {highest_score}/100 Pts")
+                print(f"  Breakout Reason      : {best_candidate['breakout_reason']}")
+                return best_candidate
+
+    if qualified_candidates:
+        best_candidate = qualified_candidates[0]
+        highest_score = best_candidate["composite_rating"]["composite_score"]
         print(f"\n[ENGINE A SIGNAL QUALIFIED] Top Stock: {best_candidate['symbol']} | Composite Score: {highest_score}/100 Pts")
         print(f"  Breakout Reason: {best_candidate['breakout_reason']}")
         return best_candidate
     else:
-        print(f"\n[ENGINE A NOTICE] Highest score ({highest_score:.1f}/100) below 75-Pt execution threshold. Skipping trade.")
+        print(f"\n[ENGINE A NOTICE] No candidate scored above 75-Pt execution threshold. Skipping trade.")
         return None
 
 # ==============================================================================

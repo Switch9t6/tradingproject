@@ -363,11 +363,11 @@ class DhanTrader:
         mode_label = "DRY_RUN" if self.dry_run else "LIVE"
         trade_id = self.state_mgr.record_entry_trade(
             option_contract=option_contract,
-            lot_size=lot_size,
             entry_premium=entry_premium,
-            target_price=target_price,
-            initial_stop_price=initial_stop_price,
-            execution_mode=mode_label
+            target_p=target_price,
+            stop_p=initial_stop_price,
+            execution_mode=mode_label,
+            exchange="MCX_FO" if option_contract.get("is_mcx") else "NSE_FO"
         )
 
         from reporting.telegram_bot import send_telegram_trade_entry_alert

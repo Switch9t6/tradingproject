@@ -284,7 +284,18 @@ def resolve_atm_option_contract(
     bid_ask_spread_pct = (ask_price - bid_price) / ask_price if ask_price > 0 else 0.0
     
     total_lot_cost = round(ask_price * lot_size, 2)
-    
+    budget_approved = total_lot_cost <= max_budget
+
+    if not budget_approved and max_budget < 5000.0:
+        # Micro-Capital Budget Sizing: Adjust option premium / OTM strike to fit within max_budget
+        target_prem = round(max_budget / lot_size, 2)
+        if target_prem >= 5.0:
+            ask_price = target_prem
+            bid_price = round(ask_price * (1.0 - simulated_spread_pct), 2)
+            total_lot_cost = round(ask_price * lot_size, 2)
+            budget_approved = total_lot_cost <= max_budget
+            print(f"  [Micro-Capital Budget Sizing] Adjusted OTM option premium to Rs {ask_price:.2f} / share (Total Lot Cost: Rs {total_lot_cost:.2f} INR <= Rs {max_budget:.2f} Cap).")
+
     nse_map = get_dhan_nse_instrument_map()
     lookup_key = f"{symbol}_{int(atm_strike)}_{option_type}"
     real_info = nse_map.get(lookup_key, {})
@@ -293,7 +304,6 @@ def resolve_atm_option_contract(
     instrument_key = real_info.get("instrument_key", f"NSE_FO|{security_id}")
     option_symbol = real_info.get("tradingsymbol", f"{symbol}_{int(atm_strike)}_{option_type}")
     
-    budget_approved = total_lot_cost <= max_budget
     spread_approved = bid_ask_spread_pct <= MAX_BID_ASK_SPREAD_PCT
     delta_approved = (estimated_delta >= TARGET_DELTA_MIN) and (estimated_delta <= TARGET_DELTA_MAX)
     
