@@ -7,7 +7,7 @@ import yfinance as yf
 
 print("=" * 80)
 print("     ENGINE B: 2-YEAR HISTORICAL BACKTEST & QUANTITATIVE AUDIT     ")
-print("     Asset: MCX Crude Oil Options (CRUDEOILM Mini, 10 Barrels)     ")
+print("     Asset: MCX Crude Oil Options | Initial Capital: Rs 100,000 INR ")
 print("=" * 80)
 print("Sourcing 2 years of historical Crude Oil market data via Yahoo Finance (CL=F)...")
 
@@ -56,17 +56,20 @@ for i in range(1, len(df)):
 
 df['Supertrend_Green'] = supertrend
 
-INITIAL_CAPITAL = 1000.0  # ₹1,000 INR Wallet Base
-LOT_SIZE = 10  # CRUDEOILM Mini Lot Size (10 Barrels)
+# ------------------------------------------------------------------------------
+# CONFIGURATION WITH RS 100,000 INR INITIAL CAPITAL
+# ------------------------------------------------------------------------------
+INITIAL_CAPITAL = 100000.0  # ₹100,000 INR (₹1 Lakh)
+LOT_SIZE = 100  # Standard MCX Crude Oil Contract Lot Size (100 Barrels)
 TARGET_ROI = 0.25  # +25% Target
 STOP_ROI = -0.12  # -12% Stop Loss
-FRICTION_PER_TRADE = 49.41  # STT + Exchange + Brokerage
+FRICTION_PER_TRADE = 120.0  # Brokerage + STT + Exchange Turnovers for 1 Standard Lot
 
 wallet_balance = INITIAL_CAPITAL
 trade_logs = []
 equity_curve = [INITIAL_CAPITAL]
 
-print("\nExecuting Engine B Dual-Directional (CE & PE) Strategy Backtest over 225 Qualified Sessions...")
+print("\nExecuting Engine B Backtest with Rs 100,000 Capital (Standard 100-Barrel Lot Sizing)...")
 
 for i in range(20, len(df)):
     row = df.iloc[i]
@@ -112,18 +115,21 @@ for i in range(20, len(df)):
         
     strike = round(spot / 50.0) * 50.0
     
-    # Capital Allocation & Micro-Sizing: Fit option premium within current available wallet balance
-    entry_premium = min(95.0, round((wallet_balance * 0.95) / LOT_SIZE, 2))
-    if entry_premium < 5.0:
-        continue  # Wallet depleted below mini trade threshold
-        
+    # Premium determination for Standard Lot (100 Barrels)
+    # Target 1.5% - 2.0% of Spot for ATM Premium
+    raw_prem = round(spot * 0.018, 2)
+    entry_premium = min(raw_prem, round((wallet_balance * 0.20) / LOT_SIZE, 2))  # Risk max 20% of wallet per trade
+    
     total_entry_cost = entry_premium * LOT_SIZE
+    if total_entry_cost > wallet_balance:
+        continue
+        
     target_prem = round(entry_premium * (1.0 + TARGET_ROI), 2)
     stop_prem = round(entry_premium * (1.0 + STOP_ROI), 2)
     
     session_return = (spot - open_p) / open_p
     
-    # Intraday Trade Outcome Simulation
+    # Intraday Outcome Simulation
     if direction == "BULLISH":
         if session_return > 0.004:
             exit_premium = target_prem
@@ -205,9 +211,10 @@ roi_pct = ((wallet_balance - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100.0
 
 print("=" * 80)
 print("     ENGINE B: 2-YEAR QUANTITATIVE BACKTEST PERFORMANCE REPORT     ")
+print("     CAPITAL: RS 100,000 INR (STANDARD 100-BARREL CONTRACT LOTS)    ")
 print("=" * 80)
 print(f"  Backtest Period           : {df.index[20].strftime('%Y-%m-%d')} to {df.index[-1].strftime('%Y-%m-%d')} (2 Years / 483 Sessions)")
-print(f"  Underlying Asset           : MCX Crude Oil Options (CRUDEOILM Mini, 10 Barrels)")
+print(f"  Underlying Asset           : Standard MCX Crude Oil Options (CRUDEOIL, 100 Barrels)")
 print(f"  Starting Wallet Capital   : Rs {INITIAL_CAPITAL:,.2f} INR")
 print(f"  Ending Wallet Capital     : Rs {wallet_balance:,.2f} INR")
 print(f"  Net Portfolio Return (ROI): +{roi_pct:.2f}%")
@@ -225,7 +232,7 @@ print(f"  Sharpe Ratio (Annualized) : {sharpe_ratio:.2f}")
 print(f"  Sortino Ratio (Annualized): {sortino_ratio:.2f}")
 print("=" * 80)
 
-output_csv = "reports/ENGINE_B_2YR_BACKTEST.csv"
+output_csv = "reports/ENGINE_B_100K_2YR_BACKTEST.csv"
 os.makedirs("reports", exist_ok=True)
 tdf.to_csv(output_csv, index=False)
 print(f"\n[Artifact Saved] Comprehensive trade-by-trade log saved to: '{output_csv}'")
