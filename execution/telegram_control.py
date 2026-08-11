@@ -570,25 +570,32 @@ def _register_handlers(bot):
 
     @bot.message_handler(commands=["ip", "myip"])
     def cmd_ip(message):
-        try:
-            pub_ip = "Unknown"
+        pub_ip = "Unknown"
+        endpoints = [
+            "https://api.ipify.org",
+            "https://checkip.amazonaws.com",
+            "https://ipinfo.io/ip",
+            "https://icanhazip.com",
+            "https://ifconfig.me/ip"
+        ]
+        headers = {"User-Agent": "Mozilla/5.0"}
+        for ep in endpoints:
             try:
-                pub_ip = requests.get("https://api.ipify.org", timeout=5).text.strip()
+                r = requests.get(ep, headers=headers, timeout=4)
+                if r.status_code == 200 and r.text.strip():
+                    pub_ip = r.text.strip()
+                    break
             except Exception:
-                try:
-                    pub_ip = requests.get("https://ifconfig.me/ip", timeout=5).text.strip()
-                except Exception:
-                    pass
-            bot.reply_to(message,
-                f"🌐 <b>[SERVER PUBLIC IP]</b>\n"
-                f"========================================\n"
-                f"<b>Public IP:</b> <code>{pub_ip}</code>\n"
-                f"========================================\n"
-                f"<i>If Dhan returns DH-905 (Invalid IP), ensure this IP is whitelisted on your Dhan API Portal or generate a token without IP restriction.</i>",
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            bot.reply_to(message, f"❌ Could not fetch IP: {e}")
+                continue
+
+        bot.reply_to(message,
+            f"🌐 <b>[SERVER PUBLIC IP]</b>\n"
+            f"========================================\n"
+            f"<b>Public IP:</b> <code>{pub_ip}</code>\n"
+            f"========================================\n"
+            f"<i>If Dhan returns DH-905 (Invalid IP), ensure this IP is whitelisted on your Dhan API Portal or generate a token without IP restriction.</i>",
+            parse_mode="HTML"
+        )
 
     @bot.message_handler(commands=["report", "reports", "report_csv"])
     def cmd_report(message):
