@@ -352,6 +352,7 @@ def _register_handlers(bot):
                 _safe_print(f"[Telegram Control] Executing command via /start: {' '.join(cmd)}")
                 env = os.environ.copy()
                 env["TELEGRAM_LISTENER_DISABLED"] = "1"
+                env["IS_DRY_RUN"] = "False"
                 proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                 out, _ = proc.communicate(timeout=180)
                 _safe_print(f"[Telegram Control Output]\n{out[-500:] if out else 'No output'}")
@@ -431,6 +432,7 @@ def _register_handlers(bot):
                     _safe_print(f"[Telegram Control] Executing pipeline scan via /resume: {' '.join(cmd)}")
                     env = os.environ.copy()
                     env["TELEGRAM_LISTENER_DISABLED"] = "1"
+                    env["IS_DRY_RUN"] = "False"
                     proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                     out, _ = proc.communicate(timeout=180)
                     if out and "LIVE DHAN ORDER PLACED" in out and "ORDER REJECTED" not in out:

@@ -119,24 +119,23 @@ class DhanTrader:
     ):
         self.client_id = client_id or os.getenv("DHAN_CLIENT_ID") or DHAN_CLIENT_ID
         self.access_token = access_token or os.getenv("DHAN_ACCESS_TOKEN") or os.getenv("DHAN_API_TOKEN") or DHAN_ACCESS_TOKEN
-        self.dry_run = dry_run or not self.access_token or self.access_token.startswith("MOCK")
+        self.dry_run = dry_run
         self.micro_capital = micro_capital
         self.state_mgr = StateManager(force_reset=force_reset)
 
-        if not self.dry_run and dhanhq is not None:
+        if dhanhq is not None and self.access_token and not self.access_token.startswith("MOCK"):
             try:
-                try:
-                    from dhanhq import DhanContext
-                    ctx = DhanContext(self.client_id, self.access_token)
-                    self.dhan = dhanhq(ctx)
-                except Exception:
-                    self.dhan = dhanhq(self.client_id, self.access_token)
+                from dhanhq import DhanContext
+                ctx = DhanContext(self.client_id, self.access_token)
+                self.dhan = dhanhq(ctx)
+                print(f"[Dhan Gateway] Live DhanHQ client initialized for Client ID '{self.client_id}'. Mode: {'DRY_RUN' if self.dry_run else 'LIVE PRODUCTION'}")
             except Exception as e:
-                print(f"[Dhan Gateway Notice] Failed to initialize Dhan client: {e}. Defaulting to Dry-Run.")
+                print(f"[Dhan Gateway Error] Failed to initialize Dhan client: {e}.")
                 self.dhan = None
-                self.dry_run = True
         else:
             self.dhan = None
+            if not self.dry_run:
+                print(f"[Dhan Gateway Notice] No valid Dhan access token found. Live API calls may be rejected.")
 
     @retry_api_call(max_retries=3, delay=1.0)
     def get_read_only_wallet_balance(self) -> float:
