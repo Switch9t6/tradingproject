@@ -119,21 +119,21 @@ def get_dhan_nse_instrument_map() -> dict:
     if lines:
         for l in lines[1:]:
             parts = [p.strip('"') for p in l.split(',')]
-            if len(parts) >= 9 and parts[0] == "NSE" and parts[1] in ["D", "NSE_FNO"]:
+            if len(parts) >= 11 and parts[0] == "NSE" and parts[10] in ["CE", "PE"]:
                 try:
                     sec_id_val = parts[2]
-                    tsym = parts[4]
-                    lot = parts[5]
-                    stk = float(parts[7]) if parts[7] else 0.0
-                    otype = parts[8] if len(parts) >= 9 else ""
-                    und = parts[3].upper() if len(parts) >= 4 else tsym.split("-")[0]
-                    key = f"{und}_{int(stk)}_{otype.upper()}"
+                    tsym = parts[5]
+                    lot = int(float(parts[6])) if parts[6] else 25
+                    stk = float(parts[9]) if parts[9] else 0.0
+                    otype = parts[10].upper()
+                    und = tsym.split("-")[0].upper()
+                    key = f"{und}_{int(stk)}_{otype}"
                     if key not in instr_map:
                         instr_map[key] = {
                             "security_id": sec_id_val,
                             "instrument_key": f"NSE_FO|{sec_id_val}",
                             "tradingsymbol": tsym,
-                            "lot_size": int(lot) if lot.isdigit() else 25
+                            "lot_size": lot
                         }
                 except Exception:
                     pass
@@ -283,26 +283,39 @@ def resolve_atm_option_contract(
     ask_price = round(estimated_premium * (1.0 + (simulated_spread_pct / 2.0)), 2)
     bid_ask_spread_pct = (ask_price - bid_price) / ask_price if ask_price > 0 else 0.0
     
+    nse_map = get_dhan_nse_instrument_map()
+    lookup_key = f"{symbol}_{int(atm_strike)}_{option_type}"
+    real_info = nse_map.get(lookup_key, {})
+
+    if not real_info and nse_map:
+        prefix = f"{symbol}_"
+        candidates = []
+        for k, v in nse_map.items():
+            if k.startswith(prefix) and k.endswith(f"_{option_type}"):
+                stk_val = float(k.split("_")[1]) if len(k.split("_")) >= 3 else 0.0
+                candidates.append((abs(stk_val - atm_strike), v))
+        if candidates:
+            candidates.sort(key=lambda x: x[0])
+            real_info = candidates[0][1]
+
+    if real_info.get("lot_size"):
+        lot_size = int(real_info["lot_size"])
+
+    security_id = str(real_info.get("security_id", real_info.get("instrument_key", "")))
+    instrument_key = real_info.get("instrument_key", f"NSE_FO|{security_id}")
+    option_symbol = real_info.get("tradingsymbol", f"{symbol}_{int(atm_strike)}_{option_type}")
+
     total_lot_cost = round(ask_price * lot_size, 2)
     budget_approved = total_lot_cost <= max_budget
 
     if not budget_approved and max_budget < 5000.0:
-        # Micro-Capital Budget Sizing: Adjust option premium / OTM strike to fit within max_budget
         target_prem = round(max_budget / lot_size, 2)
-        if target_prem >= 5.0:
+        if target_prem >= 1.0:
             ask_price = target_prem
             bid_price = round(ask_price * (1.0 - simulated_spread_pct), 2)
             total_lot_cost = round(ask_price * lot_size, 2)
             budget_approved = total_lot_cost <= max_budget
             print(f"  [Micro-Capital Budget Sizing] Adjusted OTM option premium to Rs {ask_price:.2f} / share (Total Lot Cost: Rs {total_lot_cost:.2f} INR <= Rs {max_budget:.2f} Cap).")
-
-    nse_map = get_dhan_nse_instrument_map()
-    lookup_key = f"{symbol}_{int(atm_strike)}_{option_type}"
-    real_info = nse_map.get(lookup_key, {})
-
-    security_id = real_info.get("security_id", real_info.get("instrument_key", "41031"))
-    instrument_key = real_info.get("instrument_key", f"NSE_FO|{security_id}")
-    option_symbol = real_info.get("tradingsymbol", f"{symbol}_{int(atm_strike)}_{option_type}")
     
     spread_approved = bid_ask_spread_pct <= MAX_BID_ASK_SPREAD_PCT
     delta_approved = (estimated_delta >= TARGET_DELTA_MIN) and (estimated_delta <= TARGET_DELTA_MAX)

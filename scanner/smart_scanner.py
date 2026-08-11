@@ -104,7 +104,14 @@ def scan_nse_equities_and_indices(
         np.random.seed(abs(hash(symbol)) % 10000)
 
         is_index_asset = symbol in ["NIFTY", "MIDCPNIFTY", "FINNIFTY", "BANKNIFTY"]
-        spot_price = float(np.random.uniform(23000.0, 24800.0)) if is_index_asset else float(np.random.uniform(200.0, 1800.0))
+        if symbol == "MIDCPNIFTY":
+            spot_price = float(np.random.uniform(12000.0, 12800.0))
+        elif symbol == "BANKNIFTY":
+            spot_price = float(np.random.uniform(49500.0, 51500.0))
+        elif is_index_asset:
+            spot_price = float(np.random.uniform(23000.0, 24200.0))
+        else:
+            spot_price = float(np.random.uniform(200.0, 1800.0))
         vol_surge_ratio = float(np.random.uniform(1.2, 3.8))
         rs_rating = float(np.random.uniform(55.0, 92.0))
         vwap_val = spot_price * float(np.random.uniform(0.992, 0.998))
