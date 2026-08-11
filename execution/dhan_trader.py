@@ -302,83 +302,137 @@ class DhanTrader:
             else:
                 print("\n[USER APPROVED] Trade execution authorized. Proceeding with order placement...\n")
 
-        # 3. Place Aggressive Limit Order on Dhan & Attach 5-Second Fill Verification Loop
-        sec_id = str(option_contract.get("security_id") or option_contract.get("instrument_key", "573917"))
+        # 3. Place MARKET Order on Dhan and wait up to 30 seconds for fill confirmation
+        sec_id = str(option_contract.get("security_id") or option_contract.get("instrument_key", ""))
         dhan_exch_seg = "MCX_COMM" if exchange == "MCX_FO" else "NSE_FNO"
 
         if not self.dry_run and self.dhan is not None:
             try:
-                # Dispatch order to Dhan API v2
-                # product_type: INTRADAY for live FnO MIS orders (NOT MARGIN)
+                # -------------------------------------------------------
+                # 3a. Fetch Real-Time Market Quote for actual ask price
+                # -------------------------------------------------------
+                real_ask_price = limit_price  # fallback to estimated
+                try:
+                    q = self.dhan.quote_data(securities={dhan_exch_seg: [int(sec_id)]})
+                    q_data = q.get("data", q) if isinstance(q, dict) else q
+                    if isinstance(q_data, dict):
+                        item = q_data.get(dhan_exch_seg, {}).get(str(sec_id), {})
+                        ltp = float(item.get("last_price") or item.get("ltp") or 0.0)
+                        if ltp > 0:
+                            real_ask_price = round(ltp * 1.005, 2)  # Ask ≈ LTP + 0.5%
+                            print(f"[Live Quote] Real LTP for {sec_id}: Rs {ltp:.2f} | Using Limit: Rs {real_ask_price:.2f}")
+                        else:
+                            print(f"[Live Quote] LTP=0 for security_id={sec_id}. Using estimated price Rs {real_ask_price:.2f}.")
+                except Exception as q_err:
+                    print(f"[Live Quote Warning] Could not fetch real quote: {q_err}. Using estimated Rs {real_ask_price:.2f}.")
+
+                # -------------------------------------------------------
+                # 3b. Place MARKET Order (fills at best available price)
+                # -------------------------------------------------------
+                print(f"\n[DHAN LIVE ORDER] Placing MARKET order: {sec_id} on {dhan_exch_seg} | Qty: {lot_size}")
                 api_resp = self.dhan.place_order(
                     security_id=sec_id,
                     exchange_segment=dhan_exch_seg,
                     transaction_type="BUY",
                     quantity=lot_size,
-                    order_type="LIMIT",
+                    order_type="MARKET",
                     product_type="INTRADAY",
-                    price=limit_price,
+                    price=0,
                     validity="DAY"
                 )
-                
+
+                print(f"[DHAN API RAW RESPONSE] {api_resp}")
+
                 data = api_resp.get("data", api_resp) if isinstance(api_resp, dict) else api_resp
                 order_id = str(data.get("orderId", "") if isinstance(data, dict) else getattr(data, "orderId", ""))
-                
-                # Check for API-level rejection before reporting success
+
+                # Check for API-level rejection
                 status_field = (api_resp.get("status") or "") if isinstance(api_resp, dict) else ""
                 remarks = (api_resp.get("remarks") or {}) if isinstance(api_resp, dict) else {}
                 api_error = remarks.get("error_message") or remarks.get("error_code") if isinstance(remarks, dict) else None
 
                 if status_field.lower() == "failure" or api_error or not order_id:
-                    print(f"[DHAN ORDER REJECTED] API returned failure. Error: {api_error}. Full response: {api_resp}")
+                    err_msg = api_error or f"No orderId in response. Full response: {api_resp}"
+                    print(f"[DHAN ORDER REJECTED] {err_msg}")
                     try:
                         from reporting.telegram_bot import send_telegram_error_alert
-                        send_telegram_error_alert(f"[ORDER REJECTED by Dhan API]\nContract: {option_symbol}\nError: {api_error or 'Unknown error'}\nFull Response: {api_resp}")
-                    except Exception as t_err:
-                        print(f"[Telegram Error Alert] {t_err}")
+                        send_telegram_error_alert(
+                            f"[ORDER REJECTED]\nContract: {option_symbol}\nSecurity ID: {sec_id}\n"
+                            f"Exchange: {dhan_exch_seg}\nError: {err_msg}"
+                        )
+                    except Exception:
+                        pass
                     return None
 
-                print(f"[LIVE DHAN ORDER PLACED] Order ID: {order_id} | Response: {api_resp}")
+                print(f"[LIVE DHAN ORDER PLACED] Order ID: {order_id}")
 
                 try:
                     from reporting.telegram_bot import send_order_placed_alert
                     send_order_placed_alert(
                         option_symbol=option_symbol,
                         lot_size=lot_size,
-                        limit_price=limit_price,
+                        limit_price=real_ask_price,
                         order_id=order_id,
                         execution_mode="LIVE PRODUCTION"
                     )
-                except Exception as t_err:
-                    print(f"[Telegram Order Alert Error] {t_err}")
-                
-                # 5-Second Fill Verification Loop
-                filled = False
-                for sec in range(1, LIMIT_ORDER_TIMEOUT_SECONDS + 1):
-                    time.sleep(1.0)
-                    if order_id:
-                        try:
-                            ord_detail = self.dhan.get_order_by_id(order_id)
-                            ord_data = ord_detail.get("data", ord_detail) if isinstance(ord_detail, dict) else ord_detail
-                            ord_status = str(ord_data.get("orderStatus", "") if isinstance(ord_data, dict) else getattr(ord_data, "orderStatus", "")).upper()
-                            if ord_status in ["TRADED", "FILLED", "SUCCESS", "EXECUTED"]:
-                                filled = True
-                                print(f"  [DHAN ORDER FILLED] Order {order_id} filled within {sec}s at price Rs {entry_premium:.2f}.")
-                                break
-                        except Exception as err:
-                            print(f"[Dhan Fill Verification Sec {sec}] Status check: {err}")
+                except Exception:
+                    pass
 
-                if not filled and order_id:
-                    print(f"[5-Sec Fill Timeout] Order {order_id} remains UNFILLED after 5 seconds. Dispatching API cancel_order()...")
+                # -------------------------------------------------------
+                # 3c. 30-Second Fill Verification Loop
+                # -------------------------------------------------------
+                filled = False
+                fill_price = real_ask_price
+                for sec in range(1, 31):  # 30 second timeout
+                    time.sleep(1.0)
                     try:
-                        self.dhan.cancel_order(order_id)
-                        print(f"  [ORDER CANCELLED] Order {order_id} successfully cancelled.")
-                    except Exception as cancel_err:
-                        print(f"  [Cancel Order Error] Could not cancel order {order_id}: {cancel_err}")
-                    return None
+                        ord_detail = self.dhan.get_order_by_id(order_id)
+                        ord_data = ord_detail.get("data", ord_detail) if isinstance(ord_detail, dict) else ord_detail
+                        ord_status = str(ord_data.get("orderStatus", "") if isinstance(ord_data, dict) else getattr(ord_data, "orderStatus", "")).upper()
+                        traded_price = float(ord_data.get("tradedPrice", 0) if isinstance(ord_data, dict) else 0)
+                        print(f"  [Fill Check {sec}s] Order {order_id} status: {ord_status}")
+                        if ord_status in ["TRADED", "FILLED", "PART_TRADED_AND_CONFIRMED", "TRANSIT"]:
+                            filled = True
+                            fill_price = traded_price if traded_price > 0 else real_ask_price
+                            print(f"  [DHAN ORDER FILLED] Order {order_id} confirmed FILLED at Rs {fill_price:.2f}.")
+                            break
+                        elif ord_status in ["REJECTED", "CANCELLED", "EXPIRED", "INVALID_REQUEST"]:
+                            print(f"  [DHAN ORDER {ord_status}] Order {order_id} was rejected/cancelled by exchange.")
+                            try:
+                                from reporting.telegram_bot import send_telegram_error_alert
+                                send_telegram_error_alert(f"[ORDER {ord_status}]\nContract: {option_symbol}\nOrder ID: {order_id}\nFull detail: {ord_data}")
+                            except Exception:
+                                pass
+                            return None
+                    except Exception as err:
+                        print(f"  [Fill Check {sec}s] Query error: {err}")
+
+                if not filled:
+                    print(f"[30s Fill Timeout] Order {order_id} still PENDING after 30 seconds.")
+                    try:
+                        from reporting.telegram_bot import send_telegram_error_alert
+                        send_telegram_error_alert(
+                            f"[ORDER TIMEOUT - NOT FILLED]\nContract: {option_symbol}\n"
+                            f"Order ID: {order_id}\nOrder pending 30s without fill. Left open on Dhan."
+                        )
+                    except Exception:
+                        pass
+                    # Do NOT cancel — MARKET orders must fill. Log and continue to monitor.
+
+                # Update entry premium with actual fill price
+                entry_premium = fill_price
+                target_price = round(entry_premium * (1.0 + TAKE_PROFIT_PCT), 2)
+                initial_stop_price = round(entry_premium * (1.0 - STOP_LOSS_PCT), 2)
+
             except Exception as e:
-                print(f"[DHAN ORDER ERROR] Failed to place order: {e}. Trade execution aborted safely.")
+                print(f"[DHAN ORDER ERROR] {e}")
+                try:
+                    from reporting.telegram_bot import send_telegram_error_alert
+                    send_telegram_error_alert(f"[ORDER EXCEPTION]\nContract: {option_symbol}\nError: {e}")
+                except Exception:
+                    pass
                 return None
+
 
         mode_label = "DRY_RUN" if self.dry_run else "LIVE"
         trade_id = self.state_mgr.record_entry_trade(
