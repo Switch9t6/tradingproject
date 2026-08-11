@@ -105,8 +105,9 @@ class AsyncDhanWebSocketMonitor:
     Streams live tick data for active option contracts via DhanHQ Feed API / Polling Stream
     with exponential backoff auto-reconnect handling.
     """
-    def __init__(self, access_token: str, instrument_key: str, monitor: PositionMonitor):
+    def __init__(self, access_token: str, instrument_key: str, monitor: PositionMonitor, client_id: str = ""):
         self.access_token = access_token
+        self.client_id = client_id or os.getenv("DHAN_CLIENT_ID", "")
         self.security_id = str(instrument_key).replace("NSE_FO|", "").replace("MCX_FO|", "")
         self.instrument_key = instrument_key
         self.monitor = monitor
@@ -154,7 +155,7 @@ class AsyncDhanWebSocketMonitor:
                     current_ltp = self.monitor.highest_price_seen
                     try:
                         from dhanhq import dhanhq, DhanContext
-                        dhan = dhanhq(DhanContext(client_id, self.access_token))
+                        dhan = dhanhq(DhanContext(self.client_id, self.access_token))
                         exch = "MCX_COMM" if "MCX" in str(self.instrument_key) else "NSE_FNO"
                         q = dhan.quote_data(securities={exch: [int(self.security_id)]})
                         data = q.get("data", q) if isinstance(q, dict) else q

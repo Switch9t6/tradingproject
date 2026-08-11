@@ -203,19 +203,71 @@ def send_daily_summary_alert(stats: Dict[str, Any]) -> bool:
     return send_telegram_message(msg)
 
 
-def send_telegram_error_alert(error_title: str, error_details: str, traceback_str: Optional[str] = None) -> bool:
+def send_telegram_error_alert(error_title_or_message: str, error_details: str = "", traceback_str: Optional[str] = None) -> bool:
     """
     Dispatches an HTML error notification to Telegram when a daemon exception or API failure occurs.
+    Accepts either (title, details) or a single combined message string.
     """
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    tb_snippet = f"\n<pre>{traceback_str[:300]}</pre>" if traceback_str else ""
+    if error_details:
+        tb_snippet = f"\n<pre>{traceback_str[:300]}</pre>" if traceback_str else ""
+        msg = (
+            f"\U0001f6a8 <b>[DAEMON SYSTEM ERROR ALERT]</b>\n"
+            f"========================================\n"
+            f"<b>Title     :</b> {error_title_or_message}\n"
+            f"<b>Time      :</b> {now_str} IST\n"
+            f"<b>Details   :</b> {error_details}"
+            f"{tb_snippet}\n"
+            f"========================================"
+        )
+    else:
+        # Single-string call from order rejection path
+        msg = (
+            f"\U0001f6a8 <b>[ERROR ALERT]</b> {now_str} IST\n"
+            f"<pre>{error_title_or_message[:600]}</pre>"
+        )
+    return send_telegram_message(msg)
+
+
+# Alias used in dhan_trader.py
+def send_telegram_trade_exit_alert(
+    trade_id: int,
+    option_symbol: str,
+    exit_premium: float,
+    net_pnl: float,
+    exit_reason: str,
+    execution_mode: str = "LIVE"
+) -> bool:
+    """
+    Wrapper alias for send_trade_exit_alert called from dhan_trader.py execute_option_trade.
+    """
+    entry_premium = 0.0  # Not available at call site; computed PnL is passed directly
+    gain_pct = 0.0
+    pnl_sign = "+" if net_pnl >= 0 else ""
+    header_tag = (
+        "\U0001f3af [PROFIT TARGET HIT]" if "TARGET" in exit_reason
+        else ("\U0001f512 [STEP TSL HIT]" if "TSL" in exit_reason
+              else ("\u23f3 [30-MIN TIME EXIT]" if "TIME" in exit_reason
+                    else "\U0001f6d1 [STOP LOSS HIT]"))
+    )
+    wallet_balance = 0.0
+    try:
+        from execution.state_manager import StateManager
+        wallet_balance = StateManager().get_current_wallet_balance()
+    except Exception:
+        pass
+
     msg = (
-        f"🚨 <b>[DAEMON SYSTEM ERROR ALERT]</b>\n"
+        f"{header_tag}\n"
         f"========================================\n"
-        f"<b>Title     :</b> {error_title}\n"
-        f"<b>Time      :</b> {now_str} IST\n"
-        f"<b>Details   :</b> {error_details}"
-        f"{tb_snippet}\n"
+        f"<b>Trade ID        :</b> #{trade_id}\n"
+        f"<b>Contract Symbol :</b> <code>{option_symbol}</code>\n"
+        f"<b>Execution Mode  :</b> {execution_mode}\n"
+        f"<b>Exit Premium    :</b> Rs {exit_premium:.2f}\n"
+        f"<b>Exit Reason     :</b> {exit_reason}\n"
+        f"----------------------------------------\n"
+        f"<b>Net Realized PnL:</b> <b>{pnl_sign}Rs {net_pnl:,.2f} INR</b>\n"
+        f"<b>Updated Balance :</b> Rs {wallet_balance:,.2f} INR\n"
         f"========================================"
     )
     return send_telegram_message(msg)

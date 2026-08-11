@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import asyncio
 import random
 import datetime
 import requests
@@ -224,10 +225,13 @@ class DhanTrader:
         ask_price = option_contract.get("ask_price", option_contract["estimated_premium"])
         bid_price = option_contract.get("bid_price", round(ask_price * 0.992, 2))
 
-        # 1. Pre-Order Bid-Ask Spread Guardrail Check (<= 1.5%)
+        # 1. Pre-Order Bid-Ask Spread Guardrail Check
+        # Micro-cap: 5.0% max (scanner uses estimated prices, real quote validated on fill)
+        # Normal: 2.5% max spread for standard lots
         spread_pct = ((ask_price - bid_price) / ask_price) * 100.0 if ask_price > 0 else 0.0
-        if spread_pct > 1.5:
-            print(f"[Dhan Trader Guardrail Block] Option Bid-Ask spread ({spread_pct:.2f}%) exceeds 1.5% limit. Execution aborted.")
+        max_spread_pct = 5.0 if self.micro_capital else 2.5
+        if spread_pct > max_spread_pct:
+            print(f"[Dhan Trader Guardrail Block] Option Bid-Ask spread ({spread_pct:.2f}%) exceeds {max_spread_pct:.1f}% limit. Execution aborted.")
             return None
 
         # 2. Aggressive Limit Price set to Ask Price for instant execution fill
@@ -239,15 +243,18 @@ class DhanTrader:
         target_price = round(entry_premium * (1.0 + TAKE_PROFIT_PCT), 2)
         initial_stop_price = round(entry_premium * (1.0 - STOP_LOSS_PCT), 2)
 
-        # Net-of-Friction Expectancy Guardrail Check
+        # Net-of-Friction Expectancy Guardrail Check (Skipped for Micro-Capital Trades)
         from reporting.friction_calculator import calculate_trade_friction
         f_est = calculate_trade_friction(lot_size, entry_premium, target_price)
         expected_target_net_pnl = f_est["net_pnl"]
         min_required_net_pnl = round(f_est["total_friction"] * 1.25, 2)
 
-        if expected_target_net_pnl < min_required_net_pnl:
+        is_micro_lot = (entry_premium * lot_size) <= 600.0  # Micro-capital: skip friction gate
+        if not is_micro_lot and expected_target_net_pnl < min_required_net_pnl:
             print(f"[Net Expectancy Guardrail Block] Expected Net Target PnL (Rs {expected_target_net_pnl:.2f}) < Min Friction Multiple (Rs {min_required_net_pnl:.2f}). Friction drag too high. Order aborted.")
             return None
+        elif is_micro_lot:
+            print(f"[Micro-Capital Mode] Friction guardrail bypassed for small lot (Lot Cost Rs {entry_premium * lot_size:.2f}). Est. Friction: Rs {f_est['total_friction']:.2f}")
 
         print("=" * 75)
         print(f"  EXECUTING AGGRESSIVE LIMIT ORDER (DHAN API V2)")
@@ -302,18 +309,16 @@ class DhanTrader:
         if not self.dry_run and self.dhan is not None:
             try:
                 # Dispatch order to Dhan API v2
+                # product_type: INTRADAY for live FnO MIS orders (NOT MARGIN)
                 api_resp = self.dhan.place_order(
                     security_id=sec_id,
                     exchange_segment=dhan_exch_seg,
                     transaction_type="BUY",
                     quantity=lot_size,
                     order_type="LIMIT",
-                    product_type="MARGIN",
+                    product_type="INTRADAY",
                     price=limit_price,
-                    trigger_price=0.0,
-                    validity="DAY",
-                    amo_time="OPEN",
-                    tag="OPTIONS_BOT"
+                    validity="DAY"
                 )
                 
                 data = api_resp.get("data", api_resp) if isinstance(api_resp, dict) else api_resp
@@ -408,7 +413,8 @@ class DhanTrader:
         ws_engine = AsyncDhanWebSocketMonitor(
             access_token=self.access_token,
             instrument_key=sec_id,
-            monitor=monitor
+            monitor=monitor,
+            client_id=self.client_id
         )
         
         loop = asyncio.new_event_loop()
@@ -426,14 +432,15 @@ class DhanTrader:
         )
 
         from reporting.telegram_bot import send_telegram_trade_exit_alert
+        net_pnl_out = trade_summary.get("net_pnl", 0.0) if isinstance(trade_summary, dict) else 0.0
         send_telegram_trade_exit_alert(
             trade_id=trade_id,
             option_symbol=option_symbol,
             exit_premium=exit_price,
-            net_pnl=trade_summary.get("net_pnl", 0.0),
+            net_pnl=net_pnl_out,
             exit_reason=exit_reason,
             execution_mode=mode_label
         )
 
-        return trade_summary
+        return trade_summary or {"net_pnl": net_pnl_out, "exit_reason": exit_reason, "exit_premium": exit_price}
 
