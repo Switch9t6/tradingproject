@@ -568,6 +568,28 @@ def _register_handlers(bot):
         except Exception as e:
             _send_or_reply(bot, message, f"❌ Failed to update Dhan token: {e}")
 
+    @bot.message_handler(commands=["ip", "myip"])
+    def cmd_ip(message):
+        try:
+            pub_ip = "Unknown"
+            try:
+                pub_ip = requests.get("https://api.ipify.org", timeout=5).text.strip()
+            except Exception:
+                try:
+                    pub_ip = requests.get("https://ifconfig.me/ip", timeout=5).text.strip()
+                except Exception:
+                    pass
+            bot.reply_to(message,
+                f"🌐 <b>[SERVER PUBLIC IP]</b>\n"
+                f"========================================\n"
+                f"<b>Public IP:</b> <code>{pub_ip}</code>\n"
+                f"========================================\n"
+                f"<i>If Dhan returns DH-905 (Invalid IP), ensure this IP is whitelisted on your Dhan API Portal or generate a token without IP restriction.</i>",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            bot.reply_to(message, f"❌ Could not fetch IP: {e}")
+
     @bot.message_handler(commands=["report", "reports", "report_csv"])
     def cmd_report(message):
         # Generates fresh HTML report file and sends document attachment directly in Telegram
