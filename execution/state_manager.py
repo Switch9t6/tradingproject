@@ -152,11 +152,12 @@ class StateManager:
         try:
             trades = self.get_today_trades()
             
-            nse_trades = [t for t in trades if ("NSE" in str(t.get("exchange", "")).upper() or "BANK" in str(t.get("option_symbol", "")).upper() or "NIFTY" in str(t.get("option_symbol", "")).upper())]
-            mcx_trades = [t for t in trades if ("MCX" in str(t.get("exchange", "")).upper() or "CRUDE" in str(t.get("option_symbol", "")).upper() or "CRUDE" in str(t.get("underlying_symbol", "")).upper())]
+            # Only LIVE trades count toward session cap — DRY_RUN trades are ignored
+            live_nse_trades = [t for t in trades if t.get("execution_mode", "").upper() == "LIVE" and ("NSE" in str(t.get("exchange", "")).upper() or "NIFTY" in str(t.get("option_symbol", "")).upper() or "BANK" in str(t.get("option_symbol", "")).upper())]
+            live_mcx_trades = [t for t in trades if t.get("execution_mode", "").upper() == "LIVE" and ("MCX" in str(t.get("exchange", "")).upper() or "CRUDE" in str(t.get("option_symbol", "")).upper() or "CRUDE" in str(t.get("underlying_symbol", "")).upper())]
             
-            actual_nse_count = len(nse_trades)
-            actual_mcx_count = len(mcx_trades)
+            actual_nse_count = len(live_nse_trades)
+            actual_mcx_count = len(live_mcx_trades)
             
             state_changed = False
             
@@ -269,10 +270,15 @@ class StateManager:
         conn.commit()
         conn.close()
 
-        if ex_segment == "MCX_FO":
-            self.state["MCX_FO_trades_today"] = self.state.get("MCX_FO_trades_today", 0) + 1
+        # Only increment session cap counter for REAL LIVE trades
+        if execution_mode.upper() == "LIVE":
+            if ex_segment == "MCX_FO":
+                self.state["MCX_FO_trades_today"] = self.state.get("MCX_FO_trades_today", 0) + 1
+            else:
+                self.state["NSE_FO_trades_today"] = self.state.get("NSE_FO_trades_today", 0) + 1
+            print(f"[State Manager] LIVE Trade #{trade_id} ({ex_segment}) recorded. SESSION LOCK ACTIVATED for today.")
         else:
-            self.state["NSE_FO_trades_today"] = self.state.get("NSE_FO_trades_today", 0) + 1
+            print(f"[State Manager] DRY_RUN Trade #{trade_id} recorded (session cap NOT incremented — dry-run only).")
 
         self.state["active_trade_id"] = trade_id
         self.state["active_position"] = {
@@ -286,7 +292,6 @@ class StateManager:
             "stop_price": stop_p
         }
         self._save_state(self.state)
-        print(f"[State Manager] Trade #{trade_id} ({execution_mode} / {ex_segment}) recorded. SESSION LOCK ACTIVATED.")
         return trade_id
 
     def record_exit_trade(self, trade_id: int, exit_premium: float, friction_fees: float = 0.0, exit_reason: str = "EXIT"):
