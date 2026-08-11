@@ -59,7 +59,8 @@ def detect_active_session(dt: Optional[datetime.datetime] = None) -> str:
 def scan_nse_equities_and_indices(
     access_token: Optional[str] = None,
     dry_run: bool = False,
-    top_3_sectors: Optional[List[str]] = None
+    top_3_sectors: Optional[List[str]] = None,
+    micro_capital: bool = False
 ) -> Optional[Dict[str, Any]]:
     """
     ENGINE A: NSE Equity & Index Breakout Scanner (100-Point Composite Matrix).
@@ -298,7 +299,8 @@ def scan_smart_opportunities(
     access_token: Optional[str] = None,
     dry_run: bool = False,
     session_override: Optional[str] = None,
-    top_3_sectors: Optional[List[str]] = None
+    top_3_sectors: Optional[List[str]] = None,
+    micro_capital: bool = False
 ) -> Optional[Dict[str, Any]]:
     """
     Main Entry Point: Smart Dual-Engine Scanner Router.
@@ -312,7 +314,7 @@ def scan_smart_opportunities(
     print(f"\n[SMART SCANNER ROUTER] Active Intelligence Session: {active_session}")
 
     if active_session == "NSE_EQUITY":
-        candidate = scan_nse_equities_and_indices(access_token=access_token, dry_run=dry_run, top_3_sectors=top_3_sectors)
+        candidate = scan_nse_equities_and_indices(access_token=access_token, dry_run=dry_run, top_3_sectors=top_3_sectors, micro_capital=micro_capital)
     elif active_session == "MCX_COMMODITY":
         candidate = scan_mcx_crude_oil_multifactor(access_token=access_token, dry_run=dry_run)
     else:

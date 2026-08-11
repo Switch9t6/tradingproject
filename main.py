@@ -262,6 +262,7 @@ def run_daily_pipeline(
         access_token=access_token,
         session_override="nse",
         top_3_sectors=top_3_sectors,
+        micro_capital=micro_capital,
         dry_run=dry_run
     )
     
