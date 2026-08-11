@@ -370,16 +370,17 @@ class DhanTrader:
             exchange="MCX_FO" if option_contract.get("is_mcx") else "NSE_FO"
         )
 
-        from reporting.telegram_bot import send_telegram_trade_entry_alert
-        send_telegram_trade_entry_alert(
-            trade_id=trade_id,
-            option_symbol=option_symbol,
-            lot_size=lot_size,
-            entry_premium=entry_premium,
-            target_price=target_price,
-            stop_price=initial_stop_price,
-            execution_mode=mode_label
-        )
+        from reporting.telegram_bot import send_trade_entry_alert
+        send_trade_entry_alert({
+            "trade_id": trade_id,
+            "option_symbol": option_symbol,
+            "lot_size": lot_size,
+            "entry_premium": entry_premium,
+            "target_price": target_price,
+            "initial_stop_loss": initial_stop_price,
+            "composite_score": option_contract.get("composite_rating", {}).get("composite_score", 80.0),
+            "execution_mode": mode_label
+        }, wallet_balance=self.get_read_only_wallet_balance())
 
         # 4. Attach Position Monitor Loop
         monitor = PositionMonitor(
