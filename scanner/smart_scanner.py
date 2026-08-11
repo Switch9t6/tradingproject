@@ -167,13 +167,27 @@ def scan_nse_equities_and_indices(
     qualified_candidates.sort(key=lambda x: x["composite_rating"]["composite_score"], reverse=True)
 
     if micro_capital:
-        # Under micro-capital mode, prioritize candidates whose option cost fits within max budget
+        from scanner.option_mapper import resolve_atm_option_contract
+        # Under micro-capital mode, prioritize Index Options first, then any candidate whose option cost fits <= Rs 500
         for cand in qualified_candidates:
             if cand["is_index"]:
+                opt_test = resolve_atm_option_contract(cand, max_budget=500.0)
+                if opt_test is not None:
+                    best_candidate = cand
+                    highest_score = cand["composite_rating"]["composite_score"]
+                    print(f"\n[ENGINE A SIGNAL QUALIFIED - MICRO CAPITAL INDEX OPTION]")
+                    print(f"  Top Index Candidate  : {best_candidate['symbol']} | Composite Score: {highest_score}/100 Pts")
+                    print(f"  Breakout Reason      : {best_candidate['breakout_reason']}")
+                    return best_candidate
+
+        # Fallback: check all qualified candidates for budget fit
+        for cand in qualified_candidates:
+            opt_test = resolve_atm_option_contract(cand, max_budget=500.0)
+            if opt_test is not None:
                 best_candidate = cand
                 highest_score = cand["composite_rating"]["composite_score"]
-                print(f"\n[ENGINE A SIGNAL QUALIFIED - MICRO CAPITAL INDEX OPTION]")
-                print(f"  Top Index Candidate  : {best_candidate['symbol']} | Composite Score: {highest_score}/100 Pts")
+                print(f"\n[ENGINE A SIGNAL QUALIFIED - MICRO CAPITAL APPROVED]")
+                print(f"  Top Candidate        : {best_candidate['symbol']} | Composite Score: {highest_score}/100 Pts")
                 print(f"  Breakout Reason      : {best_candidate['breakout_reason']}")
                 return best_candidate
 
