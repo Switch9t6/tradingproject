@@ -433,12 +433,21 @@ def _register_handlers(bot):
                     env["TELEGRAM_LISTENER_DISABLED"] = "1"
                     proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                     out, _ = proc.communicate(timeout=180)
-                    _safe_print(f"[Telegram Control Output]\n{out[-500:] if out else 'No output'}")
-                    if out and ("LIVE LIMIT ORDER PLACED" in out or "CLOSED" in out or "EXECUTED" in out or "TARGET HIT" in out):
-                        bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[PIPELINE EXECUTED SUCCESSFULLY]</b>\n\n<pre>{out[-600:]}</pre>", parse_mode="HTML")
+                    if out and "LIVE DHAN ORDER PLACED" in out and "ORDER REJECTED" not in out:
+                        bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[ORDER PLACED ON DHAN]</b>\n\n<pre>{out[-600:]}</pre>", parse_mode="HTML")
+                    elif out and ("Invalid IP" in out or "DH-905" in out or "ORDER REJECTED" in out):
+                        bot.send_message(TELEGRAM_CHAT_ID,
+                            "❌ <b>[DHAN API - ORDER REJECTED]</b>\n"
+                            "========================================\n"
+                            "Dhan rejected the order. Most likely cause:\n"
+                            "• Access token expired (valid 24h only)\n"
+                            "• Railway server IP not whitelisted on Dhan\n"
+                            "========================================\n"
+                            "Action Required: Send /settoken with a fresh token from Dhan portal.",
+                            parse_mode="HTML")
                     elif out and "UDAPI1154" in out:
-                        bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[DHAN API NOTICE]</b>\nDhanHQ API may require Railway cloud IP for order execution. Please ensure service is deployed on Railway.", parse_mode="HTML")
-                    elif out and "Session lock" in out:
+                        bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[DHAN API NOTICE]</b>\nDhanHQ API may require Railway cloud IP for order execution.", parse_mode="HTML")
+                    elif out and ("Session lock" in out or "cap reached" in out):
                         bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[SESSION LOCK]</b> Session trade cap reached for today.", parse_mode="HTML")
                     else:
                         bot.send_message(TELEGRAM_CHAT_ID, f"ℹ️ <b>[PIPELINE SUMMARY]</b>\n<pre>{out[-400:] if out else 'Scan finished'}</pre>", parse_mode="HTML")

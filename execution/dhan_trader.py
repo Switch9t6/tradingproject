@@ -318,6 +318,21 @@ class DhanTrader:
                 
                 data = api_resp.get("data", api_resp) if isinstance(api_resp, dict) else api_resp
                 order_id = str(data.get("orderId", "") if isinstance(data, dict) else getattr(data, "orderId", ""))
+                
+                # Check for API-level rejection before reporting success
+                status_field = (api_resp.get("status") or "") if isinstance(api_resp, dict) else ""
+                remarks = (api_resp.get("remarks") or {}) if isinstance(api_resp, dict) else {}
+                api_error = remarks.get("error_message") or remarks.get("error_code") if isinstance(remarks, dict) else None
+
+                if status_field.lower() == "failure" or api_error or not order_id:
+                    print(f"[DHAN ORDER REJECTED] API returned failure. Error: {api_error}. Full response: {api_resp}")
+                    try:
+                        from reporting.telegram_bot import send_telegram_error_alert
+                        send_telegram_error_alert(f"[ORDER REJECTED by Dhan API]\nContract: {option_symbol}\nError: {api_error or 'Unknown error'}\nFull Response: {api_resp}")
+                    except Exception as t_err:
+                        print(f"[Telegram Error Alert] {t_err}")
+                    return None
+
                 print(f"[LIVE DHAN ORDER PLACED] Order ID: {order_id} | Response: {api_resp}")
 
                 try:
@@ -327,7 +342,7 @@ class DhanTrader:
                         lot_size=lot_size,
                         limit_price=limit_price,
                         order_id=order_id,
-                        execution_mode="LIVE PRODUCTION" if not self.dry_run else "DRY RUN"
+                        execution_mode="LIVE PRODUCTION"
                     )
                 except Exception as t_err:
                     print(f"[Telegram Order Alert Error] {t_err}")
