@@ -547,6 +547,44 @@ def _register_handlers(bot):
         _send_or_reply(bot, status_msg, reply_markup=_build_action_keyboard(telebot)) if not isinstance(status_msg, str) else _send_or_reply(bot, message, status_msg, reply_markup=_build_action_keyboard(telebot))
 
     @bot.message_handler(commands=["settoken"])
+    def _save_and_verify_token(new_token: str) -> tuple:
+        """Validates token with Dhan API and updates local store if valid."""
+        import requests
+        from config.settings import DHAN_CLIENT_ID, TOKEN_FILE_PATH
+        client_id = DHAN_CLIENT_ID or os.getenv("DHAN_CLIENT_ID", "1113124878")
+        headers = {"dhan-client-id": client_id, "access-token": new_token, "Content-Type": "application/json"}
+        try:
+            r = requests.get("https://api.dhan.co/v2/fundlimit", headers=headers, timeout=8)
+            if r.status_code == 200:
+                data = r.json()
+                avail = float(data.get("availabelBalance") or data.get("availableBalance") or 0.0)
+                os.environ["DHAN_ACCESS_TOKEN"] = new_token
+                token_payload = {
+                    "access_token": new_token,
+                    "updated_at": datetime.datetime.now().isoformat(),
+                    "saved_timestamp": time.time(),
+                    "client_id": client_id,
+                    "expiry_prompt_sent": False
+                }
+                os.makedirs(os.path.dirname(TOKEN_FILE_PATH), exist_ok=True)
+                with open(TOKEN_FILE_PATH, "w") as f:
+                    json.dump(token_payload, f, indent=4)
+                
+                # Update state.json
+                from execution.state_manager import StateManager
+                sm = StateManager()
+                sm.state["token_saved_at"] = time.time()
+                sm.state["expiry_prompt_sent"] = False
+                sm.state["current_wallet_balance"] = avail
+                sm._save_state(sm.state)
+                
+                return True, avail, "Success"
+            else:
+                return False, 0.0, f"HTTP {r.status_code}: {r.text}"
+        except Exception as ex:
+            return False, 0.0, str(ex)
+
+    @bot.message_handler(commands=["settoken"])
     def cmd_settoken(message):
         try:
             parts = message.text.strip().split()
@@ -554,21 +592,42 @@ def _register_handlers(bot):
                 bot.reply_to(message, "⚠️ Usage: `/settoken <YOUR_24HR_DHAN_ACCESS_TOKEN>`", parse_mode="Markdown")
                 return
             new_token = parts[1].strip()
-            os.environ["DHAN_ACCESS_TOKEN"] = new_token
-            from config.settings import TOKEN_FILE_PATH
-            import json
-            token_payload = {
-                "access_token": new_token,
-                "updated_at": datetime.datetime.now().isoformat(),
-                "updated_via": "telegram_settoken"
-            }
-            os.makedirs(os.path.dirname(TOKEN_FILE_PATH), exist_ok=True)
-            with open(TOKEN_FILE_PATH, "w") as f:
-                json.dump(token_payload, f, indent=4)
-            bot.reply_to(message, "✅ <b>[Dhan Access Token Updated]</b>\nNew 24-hour Dhan Access Token saved & activated successfully!", parse_mode="HTML")
-            _safe_print("[Telegram Control] Dhan Access Token updated live via Telegram /settoken command.")
+            ok, avail, err_msg = _save_and_verify_token(new_token)
+            if ok:
+                msg = (
+                    "✅ <b>[DHAN ACCESS TOKEN RENEWED]</b>\n"
+                    "========================================\n"
+                    f"<b>Dhan Client ID:</b> <code>1113124878</code>\n"
+                    f"<b>Available Cash:</b> <code>Rs {avail:,.2f} INR</code>\n"
+                    "========================================\n"
+                    "Token verified & saved successfully! Next 23-hour automated reminder scheduled."
+                )
+                bot.reply_to(message, msg, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
+            else:
+                bot.reply_to(message, f"❌ <b>[TOKEN VALIDATION FAILED]</b>\n{err_msg}", parse_mode="HTML")
         except Exception as e:
             _send_or_reply(bot, message, f"❌ Failed to update Dhan token: {e}")
+
+    @bot.message_handler(func=lambda msg: msg.text and msg.text.strip().startswith("eyJ"))
+    def handle_raw_jwt_paste(message):
+        try:
+            raw_token = message.text.strip()
+            ok, avail, err_msg = _save_and_verify_token(raw_token)
+            if ok:
+                msg = (
+                    "✅ <b>[DHAN ACCESS TOKEN RENEWED SUCCESSFULLY]</b>\n"
+                    "========================================\n"
+                    f"<b>Dhan Client ID:</b> <code>1113124878</code>\n"
+                    f"<b>Live Available Cash:</b> <code>Rs {avail:,.2f} INR</code>\n"
+                    "========================================\n"
+                    "Token verified & saved! Your 24-hour token is active. Automated trading will continue seamlessly without interruption."
+                )
+                bot.reply_to(message, msg, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
+                _safe_print("[Telegram Control] Direct JWT token paste intercepted & validated successfully.")
+            else:
+                bot.reply_to(message, f"❌ <b>[INVALID DHAN TOKEN PASTED]</b>\n{err_msg}", parse_mode="HTML")
+        except Exception as ex:
+            bot.reply_to(message, f"❌ Error validating pasted token: {ex}")
 
     @bot.message_handler(commands=["ip", "myip"])
     def cmd_ip(message):

@@ -57,6 +57,38 @@ def run_trading_session(session_name: str):
         print(f"[AUTO-SCHEDULER ERROR] Failed to launch {session_name}: {ex}")
         send_telegram_alert(f"⚠️ <b>[AUTO-SCHEDULER WARNING]</b>\nError launching {session_name}: {ex}")
 
+def check_token_expiry_prompt():
+    """Checks token age and automatically prompts user on Telegram at the 23-hour mark."""
+    try:
+        from config.settings import TOKEN_FILE_PATH
+        import json
+        
+        if os.path.exists(TOKEN_FILE_PATH):
+            with open(TOKEN_FILE_PATH, "r") as f:
+                tdata = json.load(f)
+                saved_ts = float(tdata.get("saved_timestamp") or 0.0)
+                prompt_sent = bool(tdata.get("expiry_prompt_sent", False))
+                
+                if saved_ts > 0 and not prompt_sent:
+                    age_hours = (time.time() - saved_ts) / 3600.0
+                    if age_hours >= 23.0:
+                        send_telegram_alert(
+                            "🔑 <b>[DHAN ACCESS TOKEN EXPIRING IN 1 HOUR]</b>\n"
+                            "========================================\n"
+                            "Your 24-hour Dhan Access Token is <b>23 hours old</b> (1 hour remaining before expiry).\n\n"
+                            "<b>To keep automated trading running seamlessly:</b>\n"
+                            "1. Log in to <b><a href=\"https://web.dhan.co\">web.dhan.co</a></b> ➔ Profile ➔ Access DhanHQ API.\n"
+                            "2. Generate a fresh 24-hour Access Token.\n"
+                            "3. <b>Paste the token directly here in chat</b> (or send <code>/settoken YOUR_TOKEN</code>).\n"
+                            "========================================"
+                        )
+                        tdata["expiry_prompt_sent"] = True
+                        with open(TOKEN_FILE_PATH, "w") as wf:
+                            json.dump(tdata, wf, indent=4)
+                        print(f"[Token Expiry Checker] 23-hour token expiry prompt sent to Telegram. Age: {age_hours:.2f}h.")
+    except Exception as ex:
+        print(f"[Token Expiry Check Error] {ex}")
+
 def start_automated_daemon():
     print("=" * 80)
     print("     24/7 AUTOMATED QUANTITATIVE TRADING DAEMON INITIALIZED     ")
@@ -64,6 +96,7 @@ def start_automated_daemon():
     print("Schedules:")
     print("  - Session 1 (NSE Equity & Options) : Mon-Fri @ 09:15 AM IST")
     print("  - Session 2 (MCX Crude Oil Options): Mon-Fri @ 05:00 PM IST")
+    print("  - Dhan Token 23-Hour Expiry Monitor: Active Every 15 Minutes")
     print("Listening for schedule triggers...\n")
     
     send_telegram_alert(
@@ -72,17 +105,24 @@ def start_automated_daemon():
         f"System Status    : FULLY AUTOMATED & STANDING BY\n"
         f"Session 1 Schedule: Mon-Fri @ 09:15 AM IST (NSE)\n"
         f"Session 2 Schedule: Mon-Fri @ 05:00 PM IST (MCX)\n"
+        f"Token Monitor    : Auto-Prompt at 23 Hours Active\n"
         f"========================================\n"
         f"No manual intervention required. Trades will execute automatically!"
     )
     
     executed_today = set()
+    last_token_check = 0.0
 
     while True:
         now = get_ist_now()
         date_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H:%M")
         weekday = now.weekday() # 0 = Mon ... 4 = Fri, 5/6 = Sat/Sun
+        
+        # Check token expiry every 15 minutes
+        if time.time() - last_token_check > 900:
+            last_token_check = time.time()
+            check_token_expiry_prompt()
         
         # Reset daily execution flags at midnight IST
         if time_str == "00:00":
