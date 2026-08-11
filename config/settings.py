@@ -6,7 +6,7 @@ load_dotenv(override=True)
 
 # DhanHQ API Credentials & Configuration
 DHAN_CLIENT_ID = os.getenv("DHAN_CLIENT_ID", "")
-DHAN_ACCESS_TOKEN = os.getenv("DHAN_ACCESS_TOKEN", "")
+DHAN_ACCESS_TOKEN = os.getenv("DHAN_ACCESS_TOKEN") or os.getenv("DHAN_API_TOKEN", "")
 
 # DhanHQ API Endpoints
 DHAN_API_BASE_URL = "https://api.dhan.co/v2"

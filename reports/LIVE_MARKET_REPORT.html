@@ -395,8 +395,8 @@
                 <div class="header-subtitle">DhanHQ API v2 Autonomous Options Execution Engine</div>
             </div>
             <div class="badges">
-                <span class="badge badge-mode-dryrun">
-                    🧪 SIMULATION / DRY-RUN
+                <span class="badge badge-mode-live">
+                    🚀 LIVE PRODUCTION
                 </span>
                 <span class="badge badge-security">🔒 READ-ONLY 100% SECURE</span>
                 <span class="badge badge-date">📅 2026-08-11</span>
@@ -407,31 +407,31 @@
         <div class="metrics-grid">
             <div class="metric-card">
                 <div class="metric-label">Real-Time Wallet Balance</div>
-                <div class="metric-value" style="color: var(--accent-blue);">Rs 1,230.04</div>
+                <div class="metric-value" style="color: var(--accent-blue);">Rs 1,000.00</div>
                 <div class="metric-subtext">Initial Base Capital: Rs 1,000.00</div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Net Daily PnL</div>
                 <div class="metric-value pnl-positive">
-                    +Rs 230.04
+                    +Rs 0.00
                 </div>
                 <div class="metric-subtext pnl-positive">
-                    +23.0% Net Return
+                    +0.0% Net Return
                 </div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Daily Trades Executed</div>
-                <div class="metric-value" style="color: var(--text-main);">5 / 1</div>
+                <div class="metric-value" style="color: var(--text-main);">0 / 1</div>
                 <div class="metric-subtext">Max Cap: 1 Trade / Day Hard Lock</div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Win Rate</div>
-                <div class="metric-value" style="color: var(--accent-green);">60.0%</div>
-                <div class="metric-subtext">3 Wins / 2 Losses</div>
+                <div class="metric-value" style="color: var(--accent-amber);">0.0%</div>
+                <div class="metric-subtext">0 Wins / 0 Losses</div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Total Friction Fees</div>
-                <div class="metric-value" style="color: var(--accent-purple);">Rs 144.96</div>
+                <div class="metric-value" style="color: var(--accent-purple);">Rs 0.00</div>
                 <div class="metric-subtext">Brokerage + STT + Txn Fee + GST</div>
             </div>
         </div>
@@ -439,120 +439,13 @@
         <!-- Executed Trade Log Table -->
         <div class="card-table">
             <div class="table-title">
-                <span>Executed Intraday Option Trades (DRY-RUN SIMULATION)</span>
+                <span>Executed Intraday Option Trades (LIVE PRODUCTION)</span>
                 <span style="font-size: 13px; font-weight: 500; color: var(--text-muted);">Timestamped Session Audit</span>
             </div>
 
             
-            <div class="table-responsive">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Trade ID</th>
-                        <th>Time</th>
-                        <th>Option Contract</th>
-                        <th>Qty (Lot)</th>
-                        <th>Entry Premium</th>
-                        <th>Exit Premium</th>
-                        <th>Friction Fees</th>
-                        <th>Net PnL</th>
-                        <th>Execution Reason</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    
-                    <tr>
-                        <td style="color: var(--text-muted);">#7</td>
-                        <td>10:15:21</td>
-                        <td><span class="symbol-badge">NIFTY_23500_CE</span></td>
-                        <td>25 sh</td>
-                        <td>Rs 20.00</td>
-                        <td>Rs -</td>
-                        <td style="color: var(--accent-purple);">Rs 0.00</td>
-                        <td class="pnl-positive">
-                            <strong>+Rs 0.00</strong>
-                        </td>
-                        <td>
-                            
-                                <span class="reason-tag tag-sl">🛑 STOP LOSS (-12%)</span>
-                            
-                        </td>
-                    </tr>
-                    
-                    <tr>
-                        <td style="color: var(--text-muted);">#8</td>
-                        <td>10:16:32</td>
-                        <td><span class="symbol-badge">NIFTY_23450_CE</span></td>
-                        <td>25 sh</td>
-                        <td>Rs 20.00</td>
-                        <td>Rs -</td>
-                        <td style="color: var(--accent-purple);">Rs 0.00</td>
-                        <td class="pnl-positive">
-                            <strong>+Rs 0.00</strong>
-                        </td>
-                        <td>
-                            
-                                <span class="reason-tag tag-sl">🛑 STOP LOSS (-12%)</span>
-                            
-                        </td>
-                    </tr>
-                    
-                    <tr>
-                        <td style="color: var(--text-muted);">#9</td>
-                        <td>10:17:05</td>
-                        <td><span class="symbol-badge">NIFTY_24050_CE</span></td>
-                        <td>25 sh</td>
-                        <td>Rs 20.00</td>
-                        <td>Rs 25.00</td>
-                        <td style="color: var(--accent-purple);">Rs 48.32</td>
-                        <td class="pnl-positive">
-                            <strong>+Rs 76.68</strong>
-                        </td>
-                        <td>
-                            
-                                <span class="reason-tag tag-target">🎯 TARGET HIT (+25%)</span>
-                            
-                        </td>
-                    </tr>
-                    
-                    <tr>
-                        <td style="color: var(--text-muted);">#10</td>
-                        <td>10:18:27</td>
-                        <td><span class="symbol-badge">FINNIFTY_23150_CE</span></td>
-                        <td>25 sh</td>
-                        <td>Rs 20.00</td>
-                        <td>Rs 25.00</td>
-                        <td style="color: var(--accent-purple);">Rs 48.32</td>
-                        <td class="pnl-positive">
-                            <strong>+Rs 76.68</strong>
-                        </td>
-                        <td>
-                            
-                                <span class="reason-tag tag-target">🎯 TARGET HIT (+25%)</span>
-                            
-                        </td>
-                    </tr>
-                    
-                    <tr>
-                        <td style="color: var(--text-muted);">#11</td>
-                        <td>10:19:04</td>
-                        <td><span class="symbol-badge">FINNIFTY_24000_CE</span></td>
-                        <td>25 sh</td>
-                        <td>Rs 20.00</td>
-                        <td>Rs 25.00</td>
-                        <td style="color: var(--accent-purple);">Rs 48.32</td>
-                        <td class="pnl-positive">
-                            <strong>+Rs 76.68</strong>
-                        </td>
-                        <td>
-                            
-                                <span class="reason-tag tag-target">🎯 TARGET HIT (+25%)</span>
-                            
-                        </td>
-                    </tr>
-                    
-                </tbody>
-            </table>
+            <div class="empty-state">
+                <p>No option trades were executed during this trading session.</p>
             </div>
             
         </div>

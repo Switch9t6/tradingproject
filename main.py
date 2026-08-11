@@ -336,7 +336,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
     session_target = "mcx" if args.crude_only else args.session
     is_cloud_env = args.daemon or bool(os.path.exists("/data")) or bool(os.getenv("RAILWAY_ENVIRONMENT")) or bool(os.getenv("RAILWAY_PROJECT_ID")) or bool(os.getenv("PORT"))
-    is_dry_run = args.dry_run or (not args.live and not is_cloud_env)
+    env_dry = os.getenv("IS_DRY_RUN", "").strip().lower()
+    if env_dry in ["false", "0", "no"]:
+        is_dry_run = False
+    elif env_dry in ["true", "1", "yes"]:
+        is_dry_run = True
+    else:
+        is_dry_run = args.dry_run or (not args.live and not is_cloud_env)
     
     # 1. Start Non-Blocking Telegram Control Listener & Web Report Server
     start_telegram_listener_background()

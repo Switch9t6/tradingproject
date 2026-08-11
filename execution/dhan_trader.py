@@ -118,7 +118,7 @@ class DhanTrader:
         micro_capital: bool = False
     ):
         self.client_id = client_id or os.getenv("DHAN_CLIENT_ID") or DHAN_CLIENT_ID
-        self.access_token = access_token or os.getenv("DHAN_ACCESS_TOKEN") or DHAN_ACCESS_TOKEN
+        self.access_token = access_token or os.getenv("DHAN_ACCESS_TOKEN") or os.getenv("DHAN_API_TOKEN") or DHAN_ACCESS_TOKEN
         self.dry_run = dry_run or not self.access_token or self.access_token.startswith("MOCK")
         self.micro_capital = micro_capital
         self.state_mgr = StateManager(force_reset=force_reset)
