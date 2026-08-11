@@ -88,11 +88,7 @@ def scan_nse_equities_and_indices(
         "METAL": ["TATASTEEL", "JSWSTEEL", "HINDALCO", "COALINDIA", "VEDL"]
     }
 
-    scoped_universe = []
-    if micro_capital:
-        # Prioritize liquid Index Options (NIFTY, MIDCPNIFTY, FINNIFTY) for micro-capital accounts
-        scoped_universe.extend(["NIFTY", "MIDCPNIFTY", "FINNIFTY"])
-
+    scoped_universe = ["NIFTY", "MIDCPNIFTY", "FINNIFTY"]
     for sector in top_3_sectors:
         scoped_universe.extend(sector_universe_map.get(sector, []))
 
@@ -166,31 +162,43 @@ def scan_nse_equities_and_indices(
     # Sort qualified candidates by score
     qualified_candidates.sort(key=lambda x: x["composite_rating"]["composite_score"], reverse=True)
 
+    # Query real-time available wallet balance for budget validation
+    available_wallet_cap = 1000.0
+    try:
+        from execution.dhan_trader import DhanTrader
+        available_wallet_cap = DhanTrader(access_token=access_token, dry_run=dry_run).get_read_only_wallet_balance()
+    except Exception:
+        pass
+
     if micro_capital:
-        from scanner.option_mapper import resolve_atm_option_contract
-        # Under micro-capital mode, prioritize Index Options first, then any candidate whose option cost fits <= Rs 500
-        for cand in qualified_candidates:
-            if cand["is_index"]:
-                opt_test = resolve_atm_option_contract(cand, max_budget=500.0)
-                if opt_test is not None:
-                    best_candidate = cand
-                    highest_score = cand["composite_rating"]["composite_score"]
-                    print(f"\n[ENGINE A SIGNAL QUALIFIED - MICRO CAPITAL INDEX OPTION]")
-                    print(f"  Top Index Candidate  : {best_candidate['symbol']} | Composite Score: {highest_score}/100 Pts")
-                    print(f"  Breakout Reason      : {best_candidate['breakout_reason']}")
-                    return best_candidate
+        available_wallet_cap = min(available_wallet_cap, 500.0)
 
-        # Fallback: check all qualified candidates for budget fit
-        for cand in qualified_candidates:
-            opt_test = resolve_atm_option_contract(cand, max_budget=500.0)
-            if opt_test is not None:
-                best_candidate = cand
-                highest_score = cand["composite_rating"]["composite_score"]
-                print(f"\n[ENGINE A SIGNAL QUALIFIED - MICRO CAPITAL APPROVED]")
-                print(f"  Top Candidate        : {best_candidate['symbol']} | Composite Score: {highest_score}/100 Pts")
-                print(f"  Breakout Reason      : {best_candidate['breakout_reason']}")
-                return best_candidate
+    from scanner.option_mapper import resolve_atm_option_contract
 
+    # 1. First pass: Check for budget-approved candidates
+    for cand in qualified_candidates:
+        opt_test = resolve_atm_option_contract(cand, max_budget=available_wallet_cap)
+        if opt_test is not None:
+            best_candidate = cand
+            highest_score = cand["composite_rating"]["composite_score"]
+            print(f"\n[ENGINE A SIGNAL QUALIFIED] Top Candidate: {best_candidate['symbol']} | Composite Score: {highest_score}/100 Pts")
+            print(f"  Breakout Reason: {best_candidate['breakout_reason']}")
+            
+            try:
+                from reporting.telegram_bot import send_signal_detected_alert
+                send_signal_detected_alert(
+                    symbol=best_candidate['symbol'],
+                    option_type=best_candidate['option_type'],
+                    score=highest_score,
+                    reason=best_candidate['breakout_reason'],
+                    session="NSE Equity Morning Session"
+                )
+            except Exception as t_err:
+                print(f"[Telegram Signal Alert Error] {t_err}")
+
+            return best_candidate
+
+    # 2. Fallback: Return top candidate if no budget filtering constraint
     if qualified_candidates:
         best_candidate = qualified_candidates[0]
         highest_score = best_candidate["composite_rating"]["composite_score"]
