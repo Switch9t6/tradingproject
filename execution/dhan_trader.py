@@ -305,7 +305,21 @@ class DhanTrader:
         sec_id = str(option_contract.get("security_id") or option_contract.get("instrument_key", ""))
         dhan_exch_seg = "MCX_COMM" if exchange == "MCX_FO" else "NSE_FNO"
 
-        if not self.dry_run and self.dhan is not None:
+        if not self.dry_run:
+            if self.dhan is None:
+                err_msg = "[LIVE DHAN GATEWAY ERROR] Cannot place order: self.dhan API client is not initialized. Token may be invalid."
+                print(err_msg)
+                try:
+                    from reporting.telegram_bot import send_telegram_error_alert
+                    send_telegram_error_alert(
+                        f"🚨 <b>[LIVE ORDER ABORTED]</b>\n"
+                        f"Contract: {option_symbol}\n"
+                        f"Reason: Dhan API client is not initialized. Check DHAN_ACCESS_TOKEN and DHAN_CLIENT_ID."
+                    )
+                except Exception:
+                    pass
+                return None
+
             try:
                 # -------------------------------------------------------
                 # 3a. Fetch Real-Time Market Quote for actual ask price
