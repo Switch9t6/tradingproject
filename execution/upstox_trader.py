@@ -34,10 +34,12 @@ def auto_generate_upstox_token(force: bool = False) -> str:
     global _last_totp_attempt_time
     now = time.time()
 
-    # Cooldown Protection: Prevent duplicate TOTP login attempts within 30 minutes unless forced
+    # Cooldown Protection: Prevent duplicate TOTP login attempts within 30 minutes unless forced or token invalid
     if not force and (now - _last_totp_attempt_time < 1800):
-        print(f"[Upstox Auth Cooldown] Login attempt throttled (last attempt {int(now - _last_totp_attempt_time)}s ago). Reusing active token.")
-        return get_active_upstox_token()
+        active_tok = get_active_upstox_token()
+        if active_tok and not active_tok.startswith("MOCK") and not active_tok.startswith("your_"):
+            print(f"[Upstox Auth Cooldown] Valid active token available (login attempt {int(now - _last_totp_attempt_time)}s ago). Reusing active token.")
+            return active_tok
 
     _last_totp_attempt_time = now
 
@@ -195,41 +197,49 @@ def verify_and_fetch_live_upstox_balance(access_token: Optional[str] = None) -> 
     - Returns (False, 0.0, error_reason) if API query fails, unauthorized, or throttled.
     """
     tok = access_token or get_active_upstox_token()
-    if not tok or tok.startswith("MOCK") or tok.startswith("your_"):
-        tok = auto_generate_upstox_token()
 
-    if not tok or tok.startswith("MOCK") or tok.startswith("your_"):
-        return False, 0.0, "Upstox Access Token could not be generated via TOTP auto-login."
+    for attempt in range(2):
+        if not tok or tok.startswith("MOCK") or tok.startswith("your_"):
+            tok = auto_generate_upstox_token(force=True)
 
-    try:
-        api_client = get_upstox_api_client(tok)
-        user_api = upstox_client.UserApi(api_client)
-        api_response = user_api.get_user_fund_margin(api_version="2.0")
+        if not tok or tok.startswith("MOCK") or tok.startswith("your_"):
+            return False, 0.0, "Upstox Access Token could not be generated via TOTP auto-login."
 
-        data = getattr(api_response, "data", api_response)
-        avail = 0.0
-        if isinstance(data, dict):
-            sec_data = data.get("SEC", {}) or data.get("equity", {}) or data.get("com", {})
-            avail = float(sec_data.get("available_margin", 0.0) or sec_data.get("cash", 0.0) or 0.0)
-        else:
-            sec_data = getattr(data, "sec", None) or getattr(data, "equity", None) or getattr(data, "com", None)
-            avail = float(getattr(sec_data, "available_margin", 0.0) if sec_data else 0.0)
+        try:
+            api_client = get_upstox_api_client(tok)
+            user_api = upstox_client.UserApi(api_client)
+            api_response = user_api.get_user_fund_margin(api_version="2.0")
 
-        if avail > 0:
-            try:
-                from execution.state_manager import StateManager
-                sm = StateManager()
-                sm.state["current_wallet_balance"] = avail
-                sm._save_state(sm.state)
-            except Exception:
-                pass
-            return True, avail, "VERIFIED"
-        else:
-            return False, 0.0, "Upstox API returned 0.0 available margin."
-    except ApiException as e:
-        return False, 0.0, f"Upstox API Error ({e.status}): {e.reason}"
-    except Exception as ex:
-        return False, 0.0, f"Upstox Connection Exception: {ex}"
+            data = getattr(api_response, "data", api_response)
+            avail = 0.0
+            if isinstance(data, dict):
+                sec_data = data.get("SEC", {}) or data.get("equity", {}) or data.get("com", {})
+                avail = float(sec_data.get("available_margin", 0.0) or sec_data.get("cash", 0.0) or 0.0)
+            else:
+                sec_data = getattr(data, "sec", None) or getattr(data, "equity", None) or getattr(data, "com", None)
+                avail = float(getattr(sec_data, "available_margin", 0.0) if sec_data else 0.0)
+
+            if avail > 0:
+                try:
+                    from execution.state_manager import StateManager
+                    sm = StateManager()
+                    sm.state["current_wallet_balance"] = avail
+                    sm._save_state(sm.state)
+                except Exception:
+                    pass
+                return True, avail, "VERIFIED"
+            else:
+                return False, 0.0, "Upstox API returned 0.0 available margin."
+        except ApiException as e:
+            if e.status == 401 and attempt == 0:
+                print("[Pre-flight Verification] Token 401 Unauthorized. Retrying with fresh TOTP login...")
+                tok = auto_generate_upstox_token(force=True)
+                continue
+            return False, 0.0, f"Upstox API Error ({e.status}): {e.reason}"
+        except Exception as ex:
+            return False, 0.0, f"Upstox Connection Exception: {ex}"
+
+    return False, 0.0, "Upstox API verification retries exhausted."
 
 
 def get_live_wallet_balance(access_token: Optional[str] = None, auto_renew: bool = False) -> float:
