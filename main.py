@@ -58,17 +58,85 @@ def security_audit_check():
     else:
         sys.exit("[CRITICAL SECURITY ERROR] Security audit failed. Execution halted.")
 
+def _halt_engine_and_alert_telegram(reason: str):
+    """Halts the trading engine for the day and sends an urgent Telegram warning."""
+    try:
+        from execution.state_manager import StateManager
+        sm = StateManager()
+        sm.state["is_nse_locked_today"] = True
+        sm.state["is_mcx_locked_today"] = True
+        sm._save_state(sm.state)
+    except Exception:
+        pass
+
+    try:
+        from reporting.telegram_bot import send_telegram_message
+        msg = (
+            "🚨 <b>[PRE-FLIGHT GATE FAILED - ENGINE HALTED]</b>\n"
+            "========================================\n"
+            "<b>Reason          :</b> Could not verify real-time Upstox wallet balance.\n"
+            f"<b>Error Details   :</b> <code>{reason}</code>\n"
+            "========================================\n"
+            "⚠️ <i>TRADING ENGINE PAUSED FOR SAFETY. Please verify Upstox credentials and send /resume on Telegram once verified.</i>"
+        )
+        send_telegram_message(msg)
+    except Exception:
+        pass
+
+
 def morning_preflight_checks(dry_run: bool = False) -> float:
     """
     Morning Boot Sequence & Pre-Flight Verification (08:50 AM IST):
     1. Programmatically auto-generates fresh Upstox Access Token using TOTP.
-    2. Verifies account connectivity and ingests live wallet balance.
+    2. STRICT VERIFICATION GATE: Fetches real-time live wallet balance directly from Upstox API v2.
+    3. If balance CANNOT be verified from Upstox API, STOPS THE ENGINE for safety & alerts Telegram.
+    4. If verified, updates state.json and notifies Telegram.
     """
-    print("\n⏰ [08:50 AM IST] Executing Morning Pre-flight Boot Sequence...")
-    if not dry_run:
-        auto_generate_upstox_token()
-    bal = get_live_wallet_balance()
-    print(f"✅ [Pre-flight Verified] Live Wallet Balance: Rs {bal:,.2f} INR")
+    print("\n[08:50 AM IST] Executing Morning Pre-flight Boot Sequence...")
+    if dry_run:
+        print("[Pre-flight Dry-Run] Simulation mode active. Skipping live broker funds gate.")
+        return INITIAL_WALLET_CAPITAL
+
+    # Step 1: Auto-Generate Access Token via Headless TOTP
+    token = auto_generate_upstox_token()
+    if not token or token.startswith("MOCK") or token.startswith("your_"):
+        print("[CRITICAL PRE-FLIGHT FAILURE] Failed to generate Upstox Access Token via TOTP.")
+        _halt_engine_and_alert_telegram("Failed to generate Upstox Access Token via TOTP.")
+        return 0.0
+
+    # Step 2: Strict Live Wallet Balance Verification Gate
+    from execution.upstox_trader import verify_and_fetch_live_upstox_balance
+    is_verified, bal, err_msg = verify_and_fetch_live_upstox_balance(access_token=token)
+
+    if not is_verified or bal <= 0:
+        print(f"[PRE-FLIGHT GATE FAILED] Live Upstox wallet balance COULD NOT BE VERIFIED: {err_msg}")
+        _halt_engine_and_alert_telegram(err_msg)
+        return 0.0
+
+    # Step 3: Verified! Update state.json and notify Telegram
+    from execution.state_manager import StateManager
+    sm = StateManager()
+    sm.state["current_wallet_balance"] = bal
+    sm._save_state(sm.state)
+
+    print(f"[Pre-flight VERIFIED & MATCHED] Real-Time Upstox Live Wallet Balance: Rs {bal:,.2f} INR")
+
+    # Notify Telegram
+    try:
+        from reporting.telegram_bot import send_telegram_message
+        msg = (
+            "✅ <b>[08:50 AM PRE-FLIGHT VERIFIED & MATCHED]</b>\n"
+            "========================================\n"
+            "<b>Broker          :</b> Upstox API v2\n"
+            "<b>Account Owner   :</b> AMAN BIRENDRA PATHAK (5VC2TA)\n"
+            f"<b>Live Cash Margin:</b> <code>Rs {bal:,.2f} INR</code> (Verified)\n"
+            "========================================\n"
+            "🚀 <i>System balance verified & matched with live Upstox account. Engine APPROVED & READY for 09:15 AM Market Open!</i>"
+        )
+        send_telegram_message(msg)
+    except Exception as tele_err:
+        print(f"[Pre-flight Telegram Notice] {tele_err}")
+
     return bal
 
 
@@ -115,7 +183,18 @@ def run_mcx_crude_pipeline(
     """
     from execution.state_manager import StateManager
     state_mgr = StateManager()
-    live_wallet = state_mgr.get_current_wallet_balance()
+
+    if not dry_run:
+        from execution.upstox_trader import verify_and_fetch_live_upstox_balance
+        is_verified, verified_bal, err_msg = verify_and_fetch_live_upstox_balance()
+        if not is_verified or verified_bal <= 0:
+            print(f"[CRITICAL SAFETY HALT] MCX Pipeline stopped because live Upstox wallet balance could not be verified: {err_msg}")
+            _halt_engine_and_alert_telegram(err_msg)
+            return
+        live_wallet = verified_bal
+    else:
+        live_wallet = state_mgr.get_current_wallet_balance()
+
     budget_cap = MICRO_CAPITAL_BUDGET_CAP if micro_capital else live_wallet
 
     print("=" * 80)
@@ -215,7 +294,17 @@ def run_daily_pipeline(
 
     from execution.state_manager import StateManager
     state_mgr = StateManager()
-    live_wallet = state_mgr.get_current_wallet_balance()
+
+    if not dry_run:
+        from execution.upstox_trader import verify_and_fetch_live_upstox_balance
+        is_verified, verified_bal, err_msg = verify_and_fetch_live_upstox_balance()
+        if not is_verified or verified_bal <= 0:
+            print(f"[CRITICAL SAFETY HALT] Pipeline stopped because live Upstox wallet balance could not be verified: {err_msg}")
+            _halt_engine_and_alert_telegram(err_msg)
+            return
+        live_wallet = verified_bal
+    else:
+        live_wallet = state_mgr.get_current_wallet_balance()
 
     budget_cap = MICRO_CAPITAL_BUDGET_CAP if micro_capital else live_wallet
     

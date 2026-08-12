@@ -175,6 +175,52 @@ def get_upstox_api_client(access_token: Optional[str] = None) -> upstox_client.A
     return upstox_client.ApiClient(configuration)
 
 
+def verify_and_fetch_live_upstox_balance(access_token: Optional[str] = None) -> tuple:
+    """
+    STRICT PRE-FLIGHT VERIFICATION GATE:
+    Queries Upstox User API v2 directly to verify live wallet balance.
+    Returns tuple: (is_verified: bool, balance: float, status_msg: str).
+    - Returns (True, balance, "VERIFIED") if API returns valid balance > 0.
+    - Returns (False, 0.0, error_reason) if API query fails, unauthorized, or throttled.
+    """
+    tok = access_token or get_active_upstox_token()
+    if not tok or tok.startswith("MOCK") or tok.startswith("your_"):
+        tok = auto_generate_upstox_token()
+
+    if not tok or tok.startswith("MOCK") or tok.startswith("your_"):
+        return False, 0.0, "Upstox Access Token could not be generated via TOTP auto-login."
+
+    try:
+        api_client = get_upstox_api_client(tok)
+        user_api = upstox_client.UserApi(api_client)
+        api_response = user_api.get_user_fund_margin(api_version="2.0")
+
+        data = getattr(api_response, "data", api_response)
+        avail = 0.0
+        if isinstance(data, dict):
+            sec_data = data.get("SEC", {}) or data.get("equity", {}) or data.get("com", {})
+            avail = float(sec_data.get("available_margin", 0.0) or sec_data.get("cash", 0.0) or 0.0)
+        else:
+            sec_data = getattr(data, "sec", None) or getattr(data, "equity", None) or getattr(data, "com", None)
+            avail = float(getattr(sec_data, "available_margin", 0.0) if sec_data else 0.0)
+
+        if avail > 0:
+            try:
+                from execution.state_manager import StateManager
+                sm = StateManager()
+                sm.state["current_wallet_balance"] = avail
+                sm._save_state(sm.state)
+            except Exception:
+                pass
+            return True, avail, "VERIFIED"
+        else:
+            return False, 0.0, "Upstox API returned 0.0 available margin."
+    except ApiException as e:
+        return False, 0.0, f"Upstox API Error ({e.status}): {e.reason}"
+    except Exception as ex:
+        return False, 0.0, f"Upstox Connection Exception: {ex}"
+
+
 def get_live_wallet_balance(access_token: Optional[str] = None) -> float:
     """
     Queries Upstox User API (get_user_fund_margin) and returns real-time available cash balance directly from Upstox.
