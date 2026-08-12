@@ -177,34 +177,44 @@ def get_upstox_api_client(access_token: Optional[str] = None) -> upstox_client.A
 
 def get_live_wallet_balance(access_token: Optional[str] = None) -> float:
     """
-    Queries Upstox User API (get_user_fund_and_margin) and returns available cash balance.
-    Falls back gracefully if token is absent or API call fails.
+    Queries Upstox User API (get_user_fund_margin) and returns real-time available cash balance directly from Upstox.
+    Automatically refreshes access token via TOTP if token is missing or expired (401).
     """
     tok = access_token or get_active_upstox_token()
-    if not tok or tok.startswith("MOCK") or tok.startswith("your_"):
-        print("[Upstox Wallet Inspector] No valid Upstox token configured. Returning default wallet base.")
-        return INITIAL_WALLET_CAPITAL
+    
+    for attempt in range(2):
+        if not tok or tok.startswith("MOCK") or tok.startswith("your_"):
+            tok = auto_generate_upstox_token()
+            
+        if not tok:
+            break
+            
+        try:
+            api_client = get_upstox_api_client(tok)
+            user_api = upstox_client.UserApi(api_client)
+            api_response = user_api.get_user_fund_margin(api_version="2.0")
+            
+            data = getattr(api_response, "data", api_response)
+            avail = 0.0
+            if isinstance(data, dict):
+                sec_data = data.get("SEC", {}) or data.get("equity", {}) or data.get("com", {})
+                avail = float(sec_data.get("available_margin", 0.0) or sec_data.get("cash", 0.0) or 0.0)
+            else:
+                sec_data = getattr(data, "sec", None) or getattr(data, "equity", None) or getattr(data, "com", None)
+                avail = float(getattr(sec_data, "available_margin", 0.0) if sec_data else 0.0)
 
-    try:
-        api_client = get_upstox_api_client(tok)
-        user_api = upstox_client.UserApi(api_client)
-        api_response = user_api.get_user_fund_margin(api_version="2.0")
-        
-        data = getattr(api_response, "data", api_response)
-        if isinstance(data, dict):
-            sec_data = data.get("SEC", {}) or data.get("equity", {})
-            avail = float(sec_data.get("available_margin", 0.0) or sec_data.get("cash", 0.0) or 0.0)
-        else:
-            sec_data = getattr(data, "sec", None) or getattr(data, "equity", None)
-            avail = float(getattr(sec_data, "available_margin", 0.0) if sec_data else 0.0)
-
-        if avail > 0:
-            print(f"[Upstox Wallet Inspector] Live Available Cash Balance: Rs {avail:,.2f} INR.")
-            return avail
-    except ApiException as e:
-        print(f"[Upstox Wallet Warning] Upstox User API Exception: {e}")
-    except Exception as ex:
-        print(f"[Upstox Wallet Warning] Failed to fetch live wallet balance: {ex}")
+            if avail > 0:
+                print(f"[Upstox Live Wallet] Real-Time Available Cash Balance: Rs {avail:,.2f} INR.")
+                return avail
+        except ApiException as e:
+            if e.status == 401 and attempt == 0:
+                print("[Upstox Wallet] Token 401 Unauthorized. Auto-renewing token via TOTP...")
+                tok = auto_generate_upstox_token()
+                continue
+            print(f"[Upstox Wallet Warning] Upstox User API Exception ({e.status}): {e.reason}")
+        except Exception as ex:
+            print(f"[Upstox Wallet Warning] Failed to fetch live wallet balance: {ex}")
+            break
 
     return INITIAL_WALLET_CAPITAL
 
