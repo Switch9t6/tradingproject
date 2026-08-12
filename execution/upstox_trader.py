@@ -59,7 +59,7 @@ def get_live_wallet_balance(access_token: Optional[str] = None) -> float:
     try:
         api_client = get_upstox_api_client(tok)
         user_api = upstox_client.UserApi(api_client)
-        api_response = user_api.get_user_fund_and_margin()
+        api_response = user_api.get_user_fund_margin(api_version="2.0")
         
         data = getattr(api_response, "data", api_response)
         if isinstance(data, dict):

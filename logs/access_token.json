@@ -1,7 +1,8 @@
 {
-    "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzg2NjQ3NjQ4LCJpYXQiOjE3ODY1NjEyNDgsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTEzMTI0ODc4In0.j15wNMNb18Wd3Axtn02ZLQ55PmutUzkcmwxWCIMs23mb_unmjG-SV1myr3GvWkqykg0wQfO_0qNMgrA_JKcXaA",
-    "updated_at": "2026-08-13T00:35:48.357465",
-    "saved_timestamp": 1786561548.3574748,
-    "client_id": "1113124878",
+    "access_token": "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1VkMyVEEiLCJqdGkiOiI2YTdjY2NkYjVjZTUwZjM1OTU0Y2U3MzciLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzg2NTYzODAzLCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3ODY1NzIwMDB9.IhrExPPcUEpPeNl3f2fZyFcJyCBeLRvW_eW_wxAhbu0",
+    "user_name": "AMAN BIRENDRA PATHAK",
+    "user_id": "5VC2TA",
+    "updated_at": "2026-08-13T01:14:35.932915",
+    "saved_timestamp": 1786563875.9329386,
     "expiry_prompt_sent": false
 }

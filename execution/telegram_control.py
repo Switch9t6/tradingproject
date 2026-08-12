@@ -512,7 +512,7 @@ def _register_handlers(bot):
             configuration.access_token = new_token
             api_client = upstox_client.ApiClient(configuration)
             user_api = upstox_client.UserApi(api_client)
-            res = user_api.get_user_fund_and_margin()
+            res = user_api.get_user_fund_margin(api_version="2.0")
             
             data = getattr(res, "data", res)
             if isinstance(data, dict):
