@@ -32,12 +32,73 @@ def auto_generate_upstox_token() -> str:
     """
     try:
         from upstox_totp import UpstoxTOTP
-        print("🔐 [Upstox Auth] Initiating Headless Auto-Login Sequence...")
-        upx = UpstoxTOTP()
-        response = upx.app_token.get_access_token()
+        from urllib.parse import urlparse, parse_qs
+        import requests
         
-        if response.success and response.data and response.data.access_token:
-            access_token = response.data.access_token
+        print("[Upstox Auth] Initiating Headless Auto-Login Sequence...")
+        
+        username = os.getenv("UPSTOX_USERNAME", "9699990215").strip()
+        pin_code = os.getenv("UPSTOX_PIN_CODE", "").strip()
+        totp_secret = os.getenv("UPSTOX_TOTP_SECRET", "").strip()
+        client_id = os.getenv("UPSTOX_CLIENT_ID", "").strip() or os.getenv("UPSTOX_API_KEY", "").strip()
+        client_secret = os.getenv("UPSTOX_CLIENT_SECRET", "").strip() or os.getenv("UPSTOX_API_SECRET", "").strip()
+        redirect_uri = os.getenv("UPSTOX_REDIRECT_URI", "https://localhost").strip()
+
+        # Set fallback env vars for upstox-totp internal loader
+        os.environ["UPSTOX_CLIENT_ID"] = client_id
+        os.environ["UPSTOX_CLIENT_SECRET"] = client_secret
+        if not os.getenv("UPSTOX_PASSWORD"):
+            os.environ["UPSTOX_PASSWORD"] = pin_code
+
+        upx = UpstoxTOTP(
+            username=username,
+            pin_code=pin_code,
+            totp_secret=totp_secret,
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri
+        )
+
+        access_token = None
+        user_name = "AMAN BIRENDRA PATHAK"
+        user_id = "5VC2TA"
+
+        # Method 1: Standard upstox_totp get_access_token()
+        try:
+            res = upx.app_token.get_access_token()
+            if res and res.success and res.data and res.data.access_token:
+                access_token = res.data.access_token
+                user_name = getattr(res.data, "user_name", user_name)
+                user_id = getattr(res.data, "user_id", user_id)
+        except Exception:
+            pass
+
+        # Method 2: Extract code from 2FA oauth_authorization() and exchange directly
+        if not access_token:
+            oauth_res = upx.app_token.oauth_authorization()
+            if oauth_res and oauth_res.data and oauth_res.data.redirectUri:
+                parsed = urlparse(oauth_res.data.redirectUri)
+                params = parse_qs(parsed.query)
+                code_list = params.get("code")
+                if code_list:
+                    code = code_list[0]
+                    token_url = "https://api.upstox.com/v2/login/authorization/token"
+                    headers = {"accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}
+                    post_data = {
+                        "code": code,
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "redirect_uri": redirect_uri,
+                        "grant_type": "authorization_code"
+                    }
+                    tok_resp = requests.post(token_url, headers=headers, data=post_data, timeout=10)
+                    if tok_resp.status_code == 200:
+                        tj = tok_resp.json()
+                        access_token = tj.get("access_token")
+                        user_name = tj.get("user_name", user_name)
+                        user_id = tj.get("user_id", user_id)
+
+        if access_token:
             os.environ["UPSTOX_ACCESS_TOKEN"] = access_token
             
             # Save to .env
@@ -59,11 +120,9 @@ def auto_generate_upstox_token() -> str:
                     with open(env_path, "w", encoding="utf-8") as f:
                         f.writelines(new_lines)
                 except Exception as env_err:
-                    print(f"⚠️ [Upstox Auth Notice] Could not update .env: {env_err}")
+                    print(f"[Upstox Auth Notice] Could not update .env: {env_err}")
 
             # Save to logs/access_token.json
-            user_name = getattr(response.data, "user_name", "")
-            user_id = getattr(response.data, "user_id", "")
             token_payload = {
                 "access_token": access_token,
                 "user_name": user_name,
@@ -83,12 +142,12 @@ def auto_generate_upstox_token() -> str:
             sm.state["expiry_prompt_sent"] = False
             sm._save_state(sm.state)
             
-            print(f"✅ [Upstox Auth] Auto-Login Successful! Fresh Access Token acquired for {user_name} ({user_id}).")
+            print(f"[Upstox Auth] Auto-Login Successful! Fresh Access Token acquired for {user_name} ({user_id}).")
             return access_token
         else:
-            print(f"❌ [Upstox Auth Error] Failed to generate token: {response}")
+            print("[Upstox Auth Error] Failed to generate access token.")
     except Exception as err:
-        print(f"💥 [Upstox Auth Exception] Error during automated login: {err}")
+        print(f"[Upstox Auth Exception] Error during automated login: {err}")
         
     return os.getenv("UPSTOX_ACCESS_TOKEN", "").strip()
 
