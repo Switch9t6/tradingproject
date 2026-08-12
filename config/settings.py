@@ -19,8 +19,8 @@ UPSTOX_TOTP_SECRET = os.getenv("UPSTOX_TOTP_SECRET", "")
 UPSTOX_API_BASE_URL = "https://api.upstox.com/v2"
 
 # Security & Capital Constraints
-INITIAL_WALLET_CAPITAL = 1000.0           # Upstox Live Wallet Available Cash Base (INR 1,000.00)
-MICRO_CAPITAL_BUDGET_CAP = 500.0          # Budget Cap <= INR 500.00
+INITIAL_WALLET_CAPITAL = 100000.0          # Upstox Live Wallet Available Cash Base (INR 100,000.00)
+MICRO_CAPITAL_BUDGET_CAP = 1000.0          # Budget Cap <= INR 1,000.00 for micro sizing
 # Note: Standard single-lot premium budget is 100% dynamically sized based on actual available wallet balance.
 
 # Strict Daily Guardrails
