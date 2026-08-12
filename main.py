@@ -224,6 +224,9 @@ def run_mcx_crude_pipeline(
     access_token = run_oauth_flow(dry_run=dry_run)
     if not access_token:
         print("[Error] Failed to acquire valid access token for MCX Session.")
+        if not dry_run:
+            from execution.upstox_trader import handle_execution_issue_and_halt
+            handle_execution_issue_and_halt("Authentication Failed", "Failed to acquire valid Upstox Access Token for MCX Session.", "MCX_CRUDE")
         return
 
     # 5. Scan MCX Crude Oil Multi-Factor 100-Point Matrix via Smart Scanner
@@ -331,6 +334,9 @@ def run_daily_pipeline(
     access_token = run_oauth_flow(dry_run=dry_run)
     if not access_token:
         print("[Error] Failed to acquire valid access token. Aborting pipeline.")
+        if not dry_run:
+            from execution.upstox_trader import handle_execution_issue_and_halt
+            handle_execution_issue_and_halt("Authentication Failed", "Failed to acquire valid Upstox Access Token for NSE Session.", "NSE_EQUITY")
         return
 
     trader = UpstoxTrader(dry_run=dry_run, force_reset=reset_state)

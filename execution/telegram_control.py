@@ -358,8 +358,8 @@ def _register_handlers(bot):
                 _safe_print(f"[Telegram Control Output]\n{out[-500:] if out else 'No output'}")
                 if out and ("LIVE LIMIT ORDER PLACED" in out or "CLOSED" in out or "EXECUTED" in out or "TARGET HIT" in out):
                     bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[PIPELINE EXECUTED SUCCESSFULLY]</b>\n\n<pre>{out[-600:]}</pre>", parse_mode="HTML")
-                elif out and "UDAPI1154" in out:
-                    bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[DHAN API NOTICE]</b>\nDhanHQ API may require Railway cloud IP for order execution. Please ensure service is deployed on Railway.", parse_mode="HTML")
+                elif out and "UDAPI" in out:
+                    bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[UPSTOX API NOTICE]</b>\nUpstox API v2 endpoint response notice. Please verify token status on Telegram.", parse_mode="HTML")
                 elif out and "Session lock" in out:
                     bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[SESSION LOCK]</b> Session trade cap reached for today.", parse_mode="HTML")
                 else:
@@ -414,10 +414,18 @@ def _register_handlers(bot):
         try:
             if os.path.exists(BOT_DISABLED_FLAG):
                 os.remove(BOT_DISABLED_FLAG)
+            try:
+                from execution.state_manager import StateManager
+                sm = StateManager()
+                sm.state["is_nse_locked_today"] = False
+                sm.state["is_mcx_locked_today"] = False
+                sm._save_state(sm.state)
+            except Exception:
+                pass
             bot.reply_to(
                 message,
                 "▶️ [TRADING ENGINE RESUMED]\n"
-                "Dynamic scanning re-enabled. Triggering active session market scan...",
+                "Dynamic scanning re-enabled. Emergency locks cleared. Triggering active session market scan...",
                 reply_markup=_build_action_keyboard(telebot)
             )
             _safe_print("[Telegram Control] Trading engine RESUMED via Telegram /resume command.")
@@ -607,7 +615,7 @@ def _register_handlers(bot):
             f"========================================\n"
             f"<b>Public IP:</b> <code>{pub_ip}</code>\n"
             f"========================================\n"
-            f"<i>If Dhan returns DH-905 (Invalid IP), ensure this IP is whitelisted on your Dhan API Portal or generate a token without IP restriction.</i>",
+            f"<i>Server IP is active and connected to Upstox API v2 gateway.</i>",
             parse_mode="HTML"
         )
 
@@ -652,49 +660,39 @@ def _register_handlers(bot):
     def cmd_trades(message):
         # /trades works ANYTIME (both when market is open and closed)
         try:
-            from dhanhq import dhanhq, DhanContext
-            from config.settings import DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN, TOKEN_FILE_PATH
-
-            client_id = DHAN_CLIENT_ID or os.getenv("DHAN_CLIENT_ID", "")
-            token = DHAN_ACCESS_TOKEN or os.getenv("DHAN_ACCESS_TOKEN", "")
-            token_file = TOKEN_FILE_PATH if os.path.exists(TOKEN_FILE_PATH) else "access_token.json"
-            if (not token or token.startswith("MOCK")) and os.path.exists(token_file):
-                with open(token_file, "r") as f:
-                    tdata = json.load(f)
-                    token = tdata.get("access_token", token)
-                    client_id = tdata.get("client_id", client_id)
-
+            import upstox_client
+            from execution.upstox_trader import get_active_upstox_token
+            tok = get_active_upstox_token()
             today_str = datetime.datetime.now(IST_TZ).date().isoformat()
 
-            # --- Primary: DhanHQ Live Order Book ---
-            dhan_trades = []
-            if token and not token.startswith("MOCK"):
+            # --- Primary: Upstox Live Order Book ---
+            upstox_trades = []
+            if tok and not tok.startswith("MOCK") and not tok.startswith("your_"):
                 try:
-                    ctx = DhanContext(client_id, token)
-                    dhan = dhanhq(ctx)
-                    res = dhan.get_order_list()
-                    orders = res.get("data", []) if isinstance(res, dict) else []
-                    dhan_trades = [
-                        o for o in orders
-                        if isinstance(o, dict)
-                        and str(o.get("orderStatus", "")).upper() in ("TRADED", "FILLED", "SUCCESS", "EXECUTED")
-                        and today_str in str(o.get("createTime", ""))
-                    ]
-                except Exception as dhan_err:
-                    _safe_print(f"[Trades Dhan API Notice] {dhan_err}")
+                    configuration = upstox_client.Configuration()
+                    configuration.access_token = tok
+                    order_api = upstox_client.OrderApi(upstox_client.ApiClient(configuration))
+                    res = order_api.get_order_book(api_version="2.0")
+                    orders = getattr(res, "data", res)
+                    if isinstance(orders, list):
+                        upstox_trades = [
+                            o for o in orders
+                            if isinstance(o, dict)
+                            and str(o.get("status", "")).upper() in ("COMPLETE", "TRADED", "FILLED")
+                        ]
+                except Exception as upstox_err:
+                    _safe_print(f"[Trades Upstox API Notice] {upstox_err}")
 
-            if dhan_trades:
-                lines = [f"[TODAY'S DHAN LIVE EXECUTED TRADES] ({len(dhan_trades)} orders)\n========================================"]
-                total_pnl = 0.0
-                for o in dhan_trades:
-                    sym = o.get("tradingSymbol", "N/A")
-                    tx = o.get("transactionType", "BUY")
-                    avg_p = float(o.get("price") or o.get("averageTradedPrice") or 0.0)
+            if upstox_trades:
+                lines = [f"[TODAY'S UPSTOX LIVE EXECUTED TRADES] ({len(upstox_trades)} orders)\n========================================"]
+                for o in upstox_trades:
+                    sym = str(o.get("trading_symbol") or o.get("instrument_token") or "N/A")
+                    tx = str(o.get("transaction_type", "BUY")).upper()
+                    avg_p = float(o.get("average_price") or o.get("price") or 0.0)
                     qty = int(o.get("quantity") or 0)
-                    status = o.get("orderStatus", "TRADED")
-                    exch = o.get("exchangeSegment", "")
-                    t_str = str(o.get("createTime", ""))
-                    lines.append(f"• {tx} {sym} ({qty} qty) @ Rs {avg_p:.2f} [{status}] [{exch}] {t_str}")
+                    status = str(o.get("status", "COMPLETE")).upper()
+                    t_str = str(o.get("order_timestamp", ""))
+                    lines.append(f"• {tx} {sym} ({qty} qty) @ Rs {avg_p:.2f} [{status}] {t_str}")
                 lines.append("========================================")
                 _send_or_reply(bot, message, "\n".join(lines), reply_markup=_build_action_keyboard(telebot))
                 return
@@ -736,7 +734,7 @@ def _register_handlers(bot):
 
     @bot.message_handler(commands=["squareoff", "close", "exit"])
     def cmd_squareoff(message):
-        bot.reply_to(message, "[SQUARE OFF] Requesting instant live position exit on DhanHQ...", reply_markup=_build_action_keyboard(telebot))
+        bot.reply_to(message, "[SQUARE OFF] Requesting instant live position exit on Upstox API v2...", reply_markup=_build_action_keyboard(telebot))
         try:
             from main import execute_hard_eod_squareoff
             res = execute_hard_eod_squareoff(dry_run=False)

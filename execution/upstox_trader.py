@@ -508,5 +508,61 @@ class UpstoxTrader:
             }
             return result
         else:
-            print(f"[Upstox Execution Aborted] Order status: {order_res.get('status')}. Remarks: {order_res.get('remarks')}")
+            status = order_res.get("status", "REJECTED")
+            remarks = order_res.get("remarks", "Order not filled")
+            print(f"[Upstox Execution Aborted] Order status: {status}. Remarks: {remarks}")
+
+            if not self.dry_run:
+                handle_execution_issue_and_halt(
+                    issue_title=f"Upstox Order Execution Failed ({status})",
+                    detailed_reason=f"Broker Response: {remarks}\nInstrument Key: {instrument_key}",
+                    symbol=option_contract.get("option_symbol", "N/A")
+                )
             return None
+
+
+def handle_execution_issue_and_halt(issue_title: str, detailed_reason: str, symbol: str = "N/A"):
+    """
+    STRICT EXECUTION ISSUE SAFEGUARD:
+    1. States problem in detail on console & logs.
+    2. Sends a detailed, formatted Telegram alert detailing the issue.
+    3. Emergency HALTS the trading engine (creates BOT_DISABLED_FLAG + locks StateManager)
+       UNTIL user manually sends /resume or /start on Telegram.
+    """
+    print(f"\n🚨 [CRITICAL EXECUTION ISSUE HALT] {issue_title}")
+    print(f"  Symbol/Contract: {symbol}")
+    print(f"  Details        : {detailed_reason}")
+
+    # 1. Emergency Pause Engine (Create BOT_DISABLED_FLAG + lock session state)
+    try:
+        from config.settings import BOT_DISABLED_FLAG
+        with open(BOT_DISABLED_FLAG, "w") as f:
+            f.write(f"PAUSED_AT={datetime.datetime.now().isoformat()}|REASON={issue_title}")
+    except Exception:
+        pass
+
+    try:
+        from execution.state_manager import StateManager
+        sm = StateManager()
+        sm.state["is_nse_locked_today"] = True
+        sm.state["is_mcx_locked_today"] = True
+        sm._save_state(sm.state)
+    except Exception:
+        pass
+
+    # 2. Dispatch Detailed Emergency Telegram Report
+    try:
+        from reporting.telegram_bot import send_telegram_message
+        msg = (
+            "🚨 <b>[EXECUTION ISSUE DETECTED - ENGINE HALTED]</b>\n"
+            "========================================\n"
+            f"<b>Issue Type       :</b> {issue_title}\n"
+            f"<b>Symbol / Contract :</b> <code>{symbol}</code>\n"
+            f"<b>Detailed Problem :</b>\n<pre>{detailed_reason}</pre>\n"
+            "========================================\n"
+            "🛑 <b>TRADING ENGINE HAS BEEN PAUSED FOR SAFETY.</b>\n"
+            "<i>No further orders will be placed. Please resolve the issue and send /resume or /start on Telegram once ready.</i>"
+        )
+        send_telegram_message(msg)
+    except Exception as tele_err:
+        print(f"[Execution Issue Telegram Notice] {tele_err}")
