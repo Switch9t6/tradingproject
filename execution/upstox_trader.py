@@ -221,16 +221,20 @@ def verify_and_fetch_live_upstox_balance(access_token: Optional[str] = None) -> 
         return False, 0.0, f"Upstox Connection Exception: {ex}"
 
 
-def get_live_wallet_balance(access_token: Optional[str] = None) -> float:
+def get_live_wallet_balance(access_token: Optional[str] = None, auto_renew: bool = False) -> float:
     """
     Queries Upstox User API (get_user_fund_margin) and returns real-time available cash balance directly from Upstox.
-    Automatically refreshes access token via TOTP if token is missing or expired (401).
+    Only triggers auto_generate_upstox_token() if auto_renew=True (e.g. during pre-flight or trade execution).
+    Prevents triggering repeated OTP generation when user types /status on Telegram.
     """
     tok = access_token or get_active_upstox_token()
     
     for attempt in range(2):
-        if not tok or tok.startswith("MOCK") or tok.startswith("your_"):
-            tok = auto_generate_upstox_token()
+        if (not tok or tok.startswith("MOCK") or tok.startswith("your_")):
+            if auto_renew:
+                tok = auto_generate_upstox_token()
+            else:
+                break
             
         if not tok:
             break
@@ -260,7 +264,7 @@ def get_live_wallet_balance(access_token: Optional[str] = None) -> float:
                     pass
                 return avail
         except ApiException as e:
-            if e.status == 401 and attempt == 0:
+            if e.status == 401 and attempt == 0 and auto_renew:
                 print("[Upstox Wallet] Token 401 Unauthorized. Auto-renewing token via TOTP...")
                 tok = auto_generate_upstox_token()
                 continue
@@ -269,7 +273,7 @@ def get_live_wallet_balance(access_token: Optional[str] = None) -> float:
             print(f"[Upstox Wallet Warning] Failed to fetch live wallet balance: {ex}")
             break
 
-    # Fallback to StateManager's recorded balance if live API query was throttled
+    # Fallback to StateManager's recorded balance without triggering OTP
     try:
         from execution.state_manager import StateManager
         return StateManager().get_current_wallet_balance()
