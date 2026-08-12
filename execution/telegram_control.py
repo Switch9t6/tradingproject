@@ -471,25 +471,19 @@ def _register_handlers(bot):
         engine_state = "PAUSED (Kill Switch Active)" if is_paused else ("ONLINE & SCANNING" if (nse_active or mcx_active) else "STANDBY")
 
         # Fetch live wallet balance directly from Upstox API
-        wallet_str = "Rs 1,000.00 INR"
+        wallet_str = "Fetching Real-Time Upstox Balance..."
         try:
-            from execution.upstox_trader import get_live_wallet_balance
-            from config.settings import TOKEN_FILE_PATH
-            token = os.getenv("UPSTOX_ACCESS_TOKEN", "")
-            token_file = TOKEN_FILE_PATH if os.path.exists(TOKEN_FILE_PATH) else "access_token.json"
-            if (not token or token.startswith("MOCK") or token.startswith("your_")) and os.path.exists(token_file):
-                with open(token_file, "r") as f:
-                    tdata = json.load(f)
-                    token = tdata.get("access_token", token)
-            avail = get_live_wallet_balance(access_token=token)
-            wallet_str = f"Rs {avail:,.2f} INR"
-            # Sync state.json
-            from execution.state_manager import StateManager
-            sm = StateManager()
-            sm.state["current_wallet_balance"] = avail
-            sm._save_state(sm.state)
-        except Exception:
-            pass
+            from execution.upstox_trader import get_live_wallet_balance, get_active_upstox_token
+            tok = get_active_upstox_token()
+            avail = get_live_wallet_balance(access_token=tok)
+            if avail > 0 and avail != 100000.0:
+                wallet_str = f"Rs {avail:,.2f} INR (Live Real-Time)"
+            elif avail == 100000.0:
+                wallet_str = "Upstox OTP Cooldown Active (~2 mins) | Live Sync Pending"
+            else:
+                wallet_str = "Connecting to Upstox API..."
+        except Exception as ex:
+            wallet_str = f"Upstox Query Pending ({ex})"
 
         status_msg = (
             "[UPSTOX DUAL-SESSION SYSTEM STATUS]\n"
