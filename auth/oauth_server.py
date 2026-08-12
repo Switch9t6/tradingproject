@@ -45,6 +45,10 @@ def run_oauth_flow(dry_run: bool = False, force_refresh: bool = False) -> str:
     # Check environment variable or token file
     env_token = os.getenv("UPSTOX_ACCESS_TOKEN", "").strip() or UPSTOX_ACCESS_TOKEN.strip()
 
+    if force_refresh:
+        from execution.upstox_trader import auto_generate_upstox_token
+        return auto_generate_upstox_token()
+
     if not force_refresh and os.path.exists(TOKEN_FILE_PATH):
         try:
             with open(TOKEN_FILE_PATH, "r") as f:
@@ -60,8 +64,9 @@ def run_oauth_flow(dry_run: bool = False, force_refresh: bool = False) -> str:
         print("[Upstox Auth] Using configured Upstox access token from environment.")
         return env_token
 
-    print("[Upstox Auth Warning] No valid UPSTOX_ACCESS_TOKEN found. Set UPSTOX_API_KEY and UPSTOX_ACCESS_TOKEN in .env.")
-    return env_token or "MOCK_UPSTOX_TOKEN"
+    print("[Upstox Auth Warning] No valid UPSTOX_ACCESS_TOKEN found. Triggering automated TOTP login...")
+    from execution.upstox_trader import auto_generate_upstox_token
+    return auto_generate_upstox_token() or "MOCK_UPSTOX_TOKEN"
 
 
 if __name__ == "__main__":

@@ -25,9 +25,77 @@ from config.settings import (
 from execution.state_manager import StateManager
 
 
+def auto_generate_upstox_token() -> str:
+    """
+    Programmatically logs in to Upstox using TOTP via upstox-totp, generates a new 24-hour Access Token,
+    and updates active system environment variables, .env, and access_token.json without manual browser intervention.
+    """
+    try:
+        from upstox_totp import UpstoxTOTP
+        print("🔐 [Upstox Auth] Initiating Headless Auto-Login Sequence...")
+        upx = UpstoxTOTP()
+        response = upx.app_token.get_access_token()
+        
+        if response.success and response.data and response.data.access_token:
+            access_token = response.data.access_token
+            os.environ["UPSTOX_ACCESS_TOKEN"] = access_token
+            
+            # Save to .env
+            env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+            if os.path.exists(env_path):
+                try:
+                    with open(env_path, "r", encoding="utf-8") as f:
+                        lines = f.readlines()
+                    new_lines = []
+                    found = False
+                    for l in lines:
+                        if l.startswith("UPSTOX_ACCESS_TOKEN="):
+                            new_lines.append(f'UPSTOX_ACCESS_TOKEN="{access_token}"\n')
+                            found = True
+                        else:
+                            new_lines.append(l)
+                    if not found:
+                        new_lines.append(f'UPSTOX_ACCESS_TOKEN="{access_token}"\n')
+                    with open(env_path, "w", encoding="utf-8") as f:
+                        f.writelines(new_lines)
+                except Exception as env_err:
+                    print(f"⚠️ [Upstox Auth Notice] Could not update .env: {env_err}")
+
+            # Save to logs/access_token.json
+            user_name = getattr(response.data, "user_name", "")
+            user_id = getattr(response.data, "user_id", "")
+            token_payload = {
+                "access_token": access_token,
+                "user_name": user_name,
+                "user_id": user_id,
+                "updated_at": datetime.datetime.now().isoformat(),
+                "saved_timestamp": time.time(),
+                "expiry_prompt_sent": False
+            }
+            os.makedirs(os.path.dirname(TOKEN_FILE_PATH), exist_ok=True)
+            with open(TOKEN_FILE_PATH, "w") as f:
+                json.dump(token_payload, f, indent=4)
+                
+            # Update state.json
+            from execution.state_manager import StateManager
+            sm = StateManager()
+            sm.state["token_saved_at"] = time.time()
+            sm.state["expiry_prompt_sent"] = False
+            sm._save_state(sm.state)
+            
+            print(f"✅ [Upstox Auth] Auto-Login Successful! Fresh Access Token acquired for {user_name} ({user_id}).")
+            return access_token
+        else:
+            print(f"❌ [Upstox Auth Error] Failed to generate token: {response}")
+    except Exception as err:
+        print(f"💥 [Upstox Auth Exception] Error during automated login: {err}")
+        
+    return os.getenv("UPSTOX_ACCESS_TOKEN", "").strip()
+
+
 def get_active_upstox_token() -> str:
-    """Helper to retrieve active Upstox access token from memory, env, or access_token.json."""
-    token = os.getenv("UPSTOX_ACCESS_TOKEN", "").strip() or UPSTOX_ACCESS_TOKEN
+    """Helper to retrieve active Upstox access token from memory, env, access_token.json or auto-login."""
+    token = os.getenv("UPSTOX_ACCESS_TOKEN", "").strip() or UPSTOX_ACCESS_TOKEN.strip()
     if (not token or token.startswith("MOCK") or token.startswith("your_")) and os.path.exists(TOKEN_FILE_PATH):
         try:
             with open(TOKEN_FILE_PATH, "r") as f:
@@ -35,6 +103,8 @@ def get_active_upstox_token() -> str:
                 token = tdata.get("access_token", token)
         except Exception:
             pass
+    if not token or token.startswith("MOCK") or token.startswith("your_"):
+        token = auto_generate_upstox_token()
     return token.strip()
 
 

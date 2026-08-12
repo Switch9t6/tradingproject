@@ -58,33 +58,37 @@ def run_trading_session(session_name: str):
         send_telegram_alert(f"⚠️ <b>[AUTO-SCHEDULER WARNING]</b>\nError launching {session_name}: {ex}")
 
 def check_token_expiry_prompt():
-    """Checks token age and automatically prompts user on Telegram at the 23-hour mark."""
+    """Checks token age and programmatically generates a fresh token via TOTP at 23-hour mark."""
     try:
         from config.settings import TOKEN_FILE_PATH
         import json
+        from execution.upstox_trader import auto_generate_upstox_token, get_live_wallet_balance
         
+        need_refresh = False
         if os.path.exists(TOKEN_FILE_PATH):
             with open(TOKEN_FILE_PATH, "r") as f:
                 tdata = json.load(f)
                 saved_ts = float(tdata.get("saved_timestamp") or 0.0)
-                prompt_sent = bool(tdata.get("expiry_prompt_sent", False))
-                
-                if saved_ts > 0 and not prompt_sent:
-                    age_hours = (time.time() - saved_ts) / 3600.0
-                    if age_hours >= 23.0:
-                        send_telegram_alert(
-                            "🔑 <b>[UPSTOX ACCESS TOKEN EXPIRING IN 1 HOUR]</b>\n"
-                            "========================================\n"
-                            "Your Upstox Access Token is <b>23 hours old</b> (1 hour remaining before expiry).\n\n"
-                            "<b>To keep automated trading running seamlessly:</b>\n"
-                            "1. Generate a fresh Access Token from Upstox API Portal.\n"
-                            "2. <b>Paste the token directly here in chat</b> (or send <code>/settoken YOUR_TOKEN</code>).\n"
-                            "========================================"
-                        )
-                        tdata["expiry_prompt_sent"] = True
-                        with open(TOKEN_FILE_PATH, "w") as wf:
-                            json.dump(tdata, wf, indent=4)
-                        print(f"[Token Expiry Checker] 23-hour token expiry prompt sent to Telegram. Age: {age_hours:.2f}h.")
+                age_hours = (time.time() - saved_ts) / 3600.0 if saved_ts > 0 else 999.0
+                if age_hours >= 23.0:
+                    need_refresh = True
+        else:
+            need_refresh = True
+
+        if need_refresh:
+            print("[Token Expiry Checker] 23-hour token age reached. Initiating Headless TOTP Auto-Login...")
+            new_tok = auto_generate_upstox_token()
+            if new_tok and not new_tok.startswith("MOCK") and not new_tok.startswith("your_"):
+                avail = get_live_wallet_balance(new_tok)
+                send_telegram_alert(
+                    "✅ <b>[UPSTOX TOKEN AUTO-RENEWED]</b>\n"
+                    "========================================\n"
+                    "Fresh 24-hour Access Token generated via Headless TOTP Auto-Login!\n"
+                    f"<b>Available Cash Balance:</b> <code>Rs {avail:,.2f} INR</code>\n"
+                    "========================================\n"
+                    "Zero manual intervention required. Automated trading continues seamlessly!"
+                )
+                print(f"[Token Expiry Checker] Token auto-renewed successfully via TOTP.")
     except Exception as ex:
         print(f"[Token Expiry Check Error] {ex}")
 

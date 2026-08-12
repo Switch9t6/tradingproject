@@ -12,7 +12,7 @@ from scanner.macro_sector_engine import MacroSectorNewsEngine
 from scanner.crude_scanner import scan_mcx_crude_oil
 from scanner.crude_news_engine import is_crude_news_blackout_window
 from scanner.smart_scanner import scan_smart_opportunities
-from execution.upstox_trader import UpstoxTrader, get_live_wallet_balance
+from execution.upstox_trader import UpstoxTrader, get_live_wallet_balance, auto_generate_upstox_token
 from execution.telegram_control import start_telegram_listener_background, is_bot_disabled
 from web.server import start_web_server_background
 from reporting.eod_reporter import generate_eod_report
@@ -57,6 +57,20 @@ def security_audit_check():
         print("[SECURITY AUDIT PASSED] 100% READ-ONLY Fund Compliance Verified. Zero wallet modification endpoints exist.")
     else:
         sys.exit("[CRITICAL SECURITY ERROR] Security audit failed. Execution halted.")
+
+def morning_preflight_checks(dry_run: bool = False) -> float:
+    """
+    Morning Boot Sequence & Pre-Flight Verification (08:50 AM IST):
+    1. Programmatically auto-generates fresh Upstox Access Token using TOTP.
+    2. Verifies account connectivity and ingests live wallet balance.
+    """
+    print("\n⏰ [08:50 AM IST] Executing Morning Pre-flight Boot Sequence...")
+    if not dry_run:
+        auto_generate_upstox_token()
+    bal = get_live_wallet_balance()
+    print(f"✅ [Pre-flight Verified] Live Wallet Balance: Rs {bal:,.2f} INR")
+    return bal
+
 
 def check_market_hours_and_calendar(session: str = "nse") -> bool:
     """
@@ -364,6 +378,10 @@ if __name__ == "__main__":
                 is_weekday = now_ist.weekday() < 5
                 
                 if is_weekday:
+                    # Pre-flight token auto-generation & wallet check at 08:50 AM IST
+                    if datetime.time(8, 50) <= c_time <= datetime.time(8, 55):
+                        morning_preflight_checks(dry_run=is_dry_run)
+
                     # Session 1: NSE Options Window
                     if (datetime.time(9, 30) <= c_time <= datetime.time(11, 15)) or (datetime.time(13, 30) <= c_time <= datetime.time(14, 30)):
                         print(f"[{c_time.strftime('%H:%M:%S')} IST] [DAEMON] Triggering Session 1 NSE Market Scan...")

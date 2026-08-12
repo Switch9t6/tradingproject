@@ -7,8 +7,13 @@ load_dotenv(override=True)
 # Upstox API v2 Credentials & Configuration
 UPSTOX_API_KEY = os.getenv("UPSTOX_API_KEY", "")
 UPSTOX_API_SECRET = os.getenv("UPSTOX_API_SECRET", "")
-UPSTOX_REDIRECT_URI = os.getenv("UPSTOX_REDIRECT_URI", "http://localhost:5000/oauth/callback")
+UPSTOX_REDIRECT_URI = os.getenv("UPSTOX_REDIRECT_URI", "https://localhost")
 UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN", "")
+
+# Upstox Automated TOTP Headless Login Credentials
+UPSTOX_USERNAME = os.getenv("UPSTOX_USERNAME", "")
+UPSTOX_PIN_CODE = os.getenv("UPSTOX_PIN_CODE", "")
+UPSTOX_TOTP_SECRET = os.getenv("UPSTOX_TOTP_SECRET", "")
 
 # Upstox API Base Endpoint
 UPSTOX_API_BASE_URL = "https://api.upstox.com/v2"
