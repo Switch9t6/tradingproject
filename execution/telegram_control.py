@@ -546,7 +546,6 @@ def _register_handlers(bot):
         )
         _send_or_reply(bot, status_msg, reply_markup=_build_action_keyboard(telebot)) if not isinstance(status_msg, str) else _send_or_reply(bot, message, status_msg, reply_markup=_build_action_keyboard(telebot))
 
-    @bot.message_handler(commands=["settoken"])
     def _save_and_verify_token(new_token: str) -> tuple:
         """Validates token with Dhan API and updates local store if valid."""
         import requests
@@ -589,7 +588,7 @@ def _register_handlers(bot):
         try:
             parts = message.text.strip().split()
             if len(parts) < 2:
-                bot.reply_to(message, "⚠️ Usage: `/settoken <YOUR_24HR_DHAN_ACCESS_TOKEN>`", parse_mode="Markdown")
+                bot.reply_to(message, "🔑 <b>[PASTE DHAN ACCESS TOKEN]</b>\n\nPlease paste your 24-hour Dhan Access Token directly in chat (starting with <code>eyJ...</code>) or send:\n<code>/settoken YOUR_TOKEN</code>", parse_mode="HTML")
                 return
             new_token = parts[1].strip()
             ok, avail, err_msg = _save_and_verify_token(new_token)
