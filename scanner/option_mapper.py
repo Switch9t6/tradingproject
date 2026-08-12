@@ -283,9 +283,9 @@ def resolve_atm_option_contract(
         max_budget = float("inf")
     symbol = candidate["symbol"]
     spot_price = candidate["spot_price"]
-    option_type = candidate["option_type"]
-    interval = candidate["strike_interval"]
-    lot_size = candidate["lot_size"]
+    option_type = candidate.get("option_type", "CE")
+    interval = candidate.get("strike_interval") or (100.0 if spot_price > 5000 else (50.0 if spot_price > 1000 else 10.0))
+    lot_size = candidate.get("lot_size") or 400
     
     atm_strike = round(spot_price / interval) * interval
     estimated_delta = 0.52
