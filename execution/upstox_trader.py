@@ -22,14 +22,25 @@ from config.settings import (
     MAX_BID_ASK_SPREAD_PCT,
     LIMIT_ORDER_TIMEOUT_SECONDS
 )
-from execution.state_manager import StateManager
+_last_totp_attempt_time = 0.0
 
 
-def auto_generate_upstox_token() -> str:
+def auto_generate_upstox_token(force: bool = False) -> str:
     """
     Programmatically logs in to Upstox using TOTP via upstox-totp, generates a new 24-hour Access Token,
     and updates active system environment variables, .env, and access_token.json without manual browser intervention.
+    Enforces a 30-minute cooldown window to prevent rapid SMS OTP generation.
     """
+    global _last_totp_attempt_time
+    now = time.time()
+
+    # Cooldown Protection: Prevent duplicate TOTP login attempts within 30 minutes unless forced
+    if not force and (now - _last_totp_attempt_time < 1800):
+        print(f"[Upstox Auth Cooldown] Login attempt throttled (last attempt {int(now - _last_totp_attempt_time)}s ago). Reusing active token.")
+        return get_active_upstox_token()
+
+    _last_totp_attempt_time = now
+
     try:
         from upstox_totp import UpstoxTOTP
         from urllib.parse import urlparse, parse_qs

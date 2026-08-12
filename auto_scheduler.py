@@ -123,16 +123,21 @@ def start_automated_daemon():
         time_str = now.strftime("%H:%M")
         weekday = now.weekday() # 0 = Mon ... 4 = Fri, 5/6 = Sat/Sun
         
-        # Check token expiry every 15 minutes
-        if time.time() - last_token_check > 900:
-            last_token_check = time.time()
-            check_token_expiry_prompt()
-        
         # Reset daily execution flags at midnight IST
         if time_str == "00:00":
             executed_today.clear()
             
         if weekday < 5:  # Monday to Friday
+            # Pre-flight Boot (08:50 AM IST)
+            preflight_key = f"{date_str}_PREFLIGHT"
+            if time_str == "08:50" and preflight_key not in executed_today:
+                executed_today.add(preflight_key)
+                try:
+                    from main import morning_preflight_checks
+                    morning_preflight_checks()
+                except Exception as pf_err:
+                    print(f"[Pre-flight Error] {pf_err}")
+
             # Session 1: NSE Morning Session (09:15 AM IST)
             nse_key = f"{date_str}_NSE"
             if time_str == "09:15" and nse_key not in executed_today:
