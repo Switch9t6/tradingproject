@@ -8,7 +8,7 @@ import numpy as np
 from typing import Dict, List, Any, Optional
 
 from config.settings import (
-    DHAN_API_BASE_URL,
+    UPSTOX_API_BASE_URL,
     MIN_VOLUME_SPIKE_RATIO,
     MIN_PRICE_MOMENTUM_PCT,
     SCANNER_UNIVERSE,
@@ -201,7 +201,7 @@ def scan_nse500_and_indices(access_token: str, dry_run: bool = False, top_3_sect
     for item in SCANNER_UNIVERSE:
         key = item["instrument_key"]
         try:
-            url = f"{DHAN_API_BASE_URL}/historical-candle/{key}/5minute/2026-08-07/2026-08-07"
+            url = f"{UPSTOX_API_BASE_URL}/historical-candle/{key}/5minute/2026-08-07/2026-08-07"
             headers = {"Accept": "application/json", "Authorization": f"Bearer {access_token}"}
             resp = requests.get(url, headers=headers, timeout=5)
             if resp.status_code == 200:

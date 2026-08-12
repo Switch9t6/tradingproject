@@ -16,7 +16,6 @@ from config.settings import (
     MCX_CRUDE_LOT_SIZE,
     MCX_CRUDE_STRIKE_STEP,
     MCX_CRUDE_MIN_ATR,
-    DHAN_API_BASE_URL
 )
 from scanner.macro_sector_engine import MacroSectorNewsEngine
 from scanner.crude_news_engine import is_crude_news_blackout_window, fetch_crude_oil_news
@@ -170,10 +169,9 @@ def scan_nse_equities_and_indices(
     qualified_candidates.sort(key=lambda x: x["composite_rating"]["composite_score"], reverse=True)
 
     # Query real-time available wallet balance for budget validation
-    available_wallet_cap = 1000.0
     try:
-        from execution.dhan_trader import DhanTrader
-        available_wallet_cap = DhanTrader(access_token=access_token, dry_run=dry_run).get_read_only_wallet_balance()
+        from execution.upstox_trader import get_live_wallet_balance
+        available_wallet_cap = get_live_wallet_balance(access_token=access_token)
     except Exception:
         pass
 

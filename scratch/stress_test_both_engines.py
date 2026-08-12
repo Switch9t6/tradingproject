@@ -8,12 +8,12 @@ sys.path.insert(0, ".")
 from scanner.macro_sector_engine import MacroSectorNewsEngine
 from scanner.smart_scanner import scan_smart_opportunities, scan_mcx_crude_oil_multifactor
 from scanner.option_mapper import resolve_atm_option_contract, get_mcx_crude_option_contract
-from execution.dhan_trader import DhanTrader
+from execution.upstox_trader import UpstoxTrader
 from execution.state_manager import StateManager
 from reporting.eod_reporter import generate_eod_report
 
 print("=" * 80)
-print("     COMPREHENSIVE STRESS TEST: BOTH QUANTITATIVE TRADING ENGINES     ")
+print("     COMPREHENSIVE STRESS TEST: BOTH QUANTITATIVE TRADING ENGINES (UPSTOX API V2)     ")
 print("=" * 80)
 print(f"Timestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}")
 print("Mode: STRESS TEST SIMULATION / FULL PIPELINE VALIDATION\n")
@@ -51,7 +51,7 @@ if nse_cand:
     contract_a = resolve_atm_option_contract(nse_cand, max_budget=1000.0)
     if contract_a:
         print(f"  -> Mapped Contract : {contract_a['option_symbol']}")
-        print(f"  -> Security ID     : {contract_a['security_id']}")
+        print(f"  -> Instrument Key  : {contract_a['instrument_key']}")
         print(f"  -> Lot Size        : {contract_a['lot_size']} shares")
         print(f"  -> Total Lot Cost  : Rs {contract_a['total_lot_cost']:,.2f} INR (Budget: Rs 1,000.00 INR)")
         print(f"  -> Budget Approved : {contract_a['budget_approved']}")
@@ -90,7 +90,7 @@ if mcx_cand:
     )
     if contract_b:
         print(f"  -> Mapped MCX Contract : {contract_b['option_symbol']}")
-        print(f"  -> Security ID         : {contract_b['security_id']}")
+        print(f"  -> Instrument Key      : {contract_b['instrument_key']}")
         print(f"  -> Lot Size (Barrels)  : {contract_b['lot_size']} barrels ({'Mini' if contract_b['lot_size']==10 else 'Standard'})")
         print(f"  -> Total Lot Cost      : Rs {contract_b['total_lot_cost']:,.2f} INR (Budget: Rs 1,000.00 INR)")
         print(f"  -> Budget Approved     : {contract_b['budget_approved']}")
@@ -108,8 +108,8 @@ print("\n" + "=" * 80)
 print("  TEST 3: EXECUTION ENGINE & STATE MANAGER VALIDATION")
 print("=" * 80)
 
-trader = DhanTrader(dry_run=True, force_reset=True)
-print(f"  -> DhanTrader Mode: {'DRY_RUN' if trader.dry_run else 'LIVE'}")
+trader = UpstoxTrader(dry_run=True, force_reset=True)
+print(f"  -> UpstoxTrader Mode: {'DRY_RUN' if trader.dry_run else 'LIVE'}")
 print(f"  -> Read-Only Wallet Balance: Rs {trader.get_read_only_wallet_balance():,.2f} INR")
 
 if contract_a:
@@ -143,7 +143,7 @@ print("                     STRESS TEST RESULTS SUMMARY                      ")
 print("=" * 80)
 print(f"  Engine A (NSE Equity & Index Options) : PASSED ({'Signal Qualified' if nse_cand else 'No Signal'})")
 print(f"  Engine B (MCX Crude Oil Options)      : PASSED ({'Signal Qualified' if mcx_cand else 'No Signal'})")
-print(f"  Scrip Master Contract Mapping        : PASSED (Real Dhan Security IDs & Lot Sizes)")
+print(f"  Upstox Instrument Mapping             : PASSED (Real Upstox Instrument Keys & Lot Sizes)")
 print(f"  State & Risk Management              : PASSED (Isolated Session State & Lockouts)")
 print(f"  Total Stress Test Execution Time     : {total_duration:.2f} seconds")
 print("=" * 80 + "\n")

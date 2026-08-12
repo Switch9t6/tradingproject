@@ -99,16 +99,14 @@ class PositionMonitor:
             print(f"⚠️ [Position Monitor Error] Error evaluating tick: {e}. Retaining active position.")
             return False, self.highest_price_seen, ""
 
-class AsyncDhanWebSocketMonitor:
+class AsyncUpstoxMarketFeedMonitor:
     """
-    ASYNC DHAN MARKET FEED TICK STREAMING ENGINE:
-    Streams live tick data for active option contracts via DhanHQ Feed API / Polling Stream
+    ASYNC UPSTOX MARKET FEED TICK STREAMING ENGINE:
+    Streams live tick data for active option contracts via Upstox Market Quote API
     with exponential backoff auto-reconnect handling.
     """
-    def __init__(self, access_token: str, instrument_key: str, monitor: PositionMonitor, client_id: str = ""):
+    def __init__(self, access_token: str, instrument_key: str, monitor: PositionMonitor):
         self.access_token = access_token
-        self.client_id = client_id or os.getenv("DHAN_CLIENT_ID", "")
-        self.security_id = str(instrument_key).replace("NSE_FO|", "").replace("MCX_FO|", "")
         self.instrument_key = instrument_key
         self.monitor = monitor
         self.is_connected = False
@@ -117,17 +115,17 @@ class AsyncDhanWebSocketMonitor:
 
     async def start_websocket_stream(self, sim_scenario: str = "AUTO", dry_run: bool = False) -> Tuple[float, str]:
         """
-        Connects to Dhan Market Feed / Polling Stream, evaluates ticks asynchronously,
+        Connects to Upstox Market Feed / Quote Polling Stream, evaluates ticks asynchronously,
         and reconnects automatically with exponential backoff if network drops.
         """
-        print(f"\n[Dhan Feed Engine] Launching Async Live Feed Stream for Security ID '{self.security_id}'...")
+        print(f"\n[Upstox Feed Engine] Launching Async Live Feed Stream for Instrument Key '{self.instrument_key}'...")
         self.is_connected = True
         start_time = time.time()
 
         while self.is_connected:
             try:
                 # Simulation / Fallback Async Tick Stream Loop
-                if dry_run or not self.access_token or self.access_token.startswith("MOCK"):
+                if dry_run or not self.access_token or self.access_token.startswith("MOCK") or self.access_token.startswith("your_"):
                     await asyncio.sleep(0.5)
                     elapsed = time.time() - start_time
                     
@@ -148,22 +146,23 @@ class AsyncDhanWebSocketMonitor:
                         self.is_connected = False
                         return exit_p, reason
                 else:
-                    # Live Dhan Market Quote Polling Loop (2-Second LTP Intervals)
+                    # Live Upstox Market Quote Polling Loop (2-Second LTP Intervals)
                     await asyncio.sleep(2.0)
                     elapsed = time.time() - start_time
                     
                     current_ltp = self.monitor.highest_price_seen
                     try:
-                        from dhanhq import dhanhq, DhanContext
-                        dhan = dhanhq(DhanContext(self.client_id, self.access_token))
-                        exch = "MCX_COMM" if "MCX" in str(self.instrument_key) else "NSE_FNO"
-                        q = dhan.quote_data(securities={exch: [int(self.security_id)]})
-                        data = q.get("data", q) if isinstance(q, dict) else q
+                        import upstox_client
+                        configuration = upstox_client.Configuration()
+                        configuration.access_token = self.access_token
+                        mq_api = upstox_client.MarketQuoteApi(upstox_client.ApiClient(configuration))
+                        res = mq_api.ltp(symbol=self.instrument_key, api_version="2.0")
+                        data = getattr(res, "data", res)
                         if isinstance(data, dict):
-                            item = data.get(exch, {}).get(str(self.security_id), {})
+                            item = data.get(self.instrument_key, {})
                             current_ltp = float(item.get("last_price") or item.get("ltp") or self.monitor.highest_price_seen)
                     except Exception as poll_err:
-                        print(f"  [Dhan LTP Feed Query Notice] {poll_err}")
+                        print(f"  [Upstox LTP Feed Query Notice] {poll_err}")
                     
                     is_exit, exit_p, reason = self.monitor.evaluate_tick(current_ltp, elapsed)
                     if is_exit:
@@ -173,9 +172,9 @@ class AsyncDhanWebSocketMonitor:
             except Exception as e:
                 self.reconnect_attempts += 1
                 backoff_delay = min(2.0 ** self.reconnect_attempts, 30.0)
-                print(f"[Dhan Feed Warning] Stream connection dropped ({e}). Attempting Exponential Backoff Reconnect {self.reconnect_attempts}/{self.max_reconnects} in {backoff_delay:.1f}s...")
+                print(f"[Upstox Feed Warning] Stream connection dropped ({e}). Attempting Exponential Backoff Reconnect {self.reconnect_attempts}/{self.max_reconnects} in {backoff_delay:.1f}s...")
                 if self.reconnect_attempts > self.max_reconnects:
-                    print("❌ [Dhan Feed Error] Max reconnect attempts exceeded. Falling back to emergency exit level.")
+                    print("❌ [Upstox Feed Error] Max reconnect attempts exceeded. Falling back to emergency exit level.")
                     return self.monitor.current_stop_p, "WEBSOCKET_DISCONNECT_EMERGENCY_EXIT"
                 await asyncio.sleep(backoff_delay)
 

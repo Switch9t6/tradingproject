@@ -177,7 +177,7 @@ def request_telegram_trade_approval(
         f"Target (+25%)  : Rs {target_price:.2f}\n"
         f"Stop Loss (-12%): Rs {stop_price:.2f}\n"
         "========================================\n"
-        "Do you authorize placing this real order on DhanHQ?"
+        "Do you authorize placing this real order on Upstox API v2?"
     )
 
     markup = telebot.types.InlineKeyboardMarkup(row_width=2)
@@ -215,7 +215,7 @@ def request_telegram_trade_approval(
     try:
         if is_approved:
             bot.edit_message_text(
-                f"✅ [ORDER APPROVED] {option_symbol} (Rs {total_cost:,.2f}) authorized by user. Order executing on DhanHQ...",
+                f"✅ [ORDER APPROVED] {option_symbol} (Rs {total_cost:,.2f}) authorized by user. Order executing on Upstox API v2...",
                 TELEGRAM_CHAT_ID,
                 sent_msg.message_id
             )
@@ -371,25 +371,21 @@ def _register_handlers(bot):
         t = threading.Thread(target=_run_pipeline_job, daemon=True)
         t.start()
 
-    @bot.message_handler(commands=["help"])
+    @bot.message_handler(commands=["help", "start"])
     def cmd_help(message):
-        if not check_is_market_open():
-            bot.reply_to(message, "market is closed try during 9:15 AM to 3:15 PM", reply_markup=_build_action_keyboard(telebot))
-            return
-
         help_text = (
-            "[DHAN LIVE ALGORITHMIC ENGINE]\n"
+            "[UPSTOX LIVE ALGORITHMIC ENGINE]\n"
             "-------------------------------------------\n"
             "Available Commands:\n"
             "/start   - Launch live trading pipeline ('python main.py --live --auto-approve')\n"
-            "/status  - Live DhanHQ Wallet Balance & Bot Health\n"
+            "/status  - Live Upstox Wallet Balance & Bot Health\n"
             "/report  - Download today's Live EOD HTML report\n"
             "/trades  - View today's executed trade log\n"
             "/stop    - Emergency Pause (Kill Switch)\n"
             "/resume  - Re-enable Trading Engine\n"
             "/help    - Show this help message\n"
             "-------------------------------------------\n"
-            "Engine Version: v3.0 (DhanHQ Live Production)"
+            "Engine Version: v3.0 (Upstox API v2 Production)"
         )
         bot.reply_to(message, help_text, reply_markup=_build_action_keyboard(telebot))
 
@@ -435,20 +431,15 @@ def _register_handlers(bot):
                     env["IS_DRY_RUN"] = "False"
                     proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                     out, _ = proc.communicate(timeout=180)
-                    if out and "LIVE DHAN ORDER PLACED" in out and "ORDER REJECTED" not in out:
-                        bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[ORDER PLACED ON DHAN]</b>\n\n<pre>{out[-600:]}</pre>", parse_mode="HTML")
-                    elif out and ("Invalid IP" in out or "DH-905" in out or "ORDER REJECTED" in out):
+                    if out and "EXECUTING AGGRESSIVE LIMIT ORDER (UPSTOX" in out and "REJECTED" not in out:
+                        bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[ORDER PLACED ON UPSTOX]</b>\n\n<pre>{out[-600:]}</pre>", parse_mode="HTML")
+                    elif out and "REJECTED" in out:
                         bot.send_message(TELEGRAM_CHAT_ID,
-                            "❌ <b>[DHAN API - ORDER REJECTED]</b>\n"
+                            "❌ <b>[UPSTOX API - ORDER REJECTED]</b>\n"
                             "========================================\n"
-                            "Dhan rejected the order. Most likely cause:\n"
-                            "• Access token expired (valid 24h only)\n"
-                            "• Railway server IP not whitelisted on Dhan\n"
-                            "========================================\n"
-                            "Action Required: Send /settoken with a fresh token from Dhan portal.",
+                            "Upstox rejected the order.\n"
+                            "Action Required: Send /settoken with a fresh token.",
                             parse_mode="HTML")
-                    elif out and "UDAPI1154" in out:
-                        bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[DHAN API NOTICE]</b>\nDhanHQ API may require Railway cloud IP for order execution.", parse_mode="HTML")
                     elif out and ("Session lock" in out or "cap reached" in out):
                         bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[SESSION LOCK]</b> Session trade cap reached for today.", parse_mode="HTML")
                     else:
@@ -479,107 +470,78 @@ def _register_handlers(bot):
         is_paused = os.path.exists(BOT_DISABLED_FLAG)
         engine_state = "PAUSED (Kill Switch Active)" if is_paused else ("ONLINE & SCANNING" if (nse_active or mcx_active) else "STANDBY")
 
-        # Fetch live wallet balance directly from Dhan API
+        # Fetch live wallet balance directly from Upstox API
         wallet_str = "Rs 1,000.00 INR"
         try:
-            from dhanhq import dhanhq, DhanContext
-            from config.settings import DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN, TOKEN_FILE_PATH
-            client_id = DHAN_CLIENT_ID or os.getenv("DHAN_CLIENT_ID", "")
-            token = DHAN_ACCESS_TOKEN or os.getenv("DHAN_ACCESS_TOKEN", "")
+            from execution.upstox_trader import get_live_wallet_balance
+            from config.settings import TOKEN_FILE_PATH
+            token = os.getenv("UPSTOX_ACCESS_TOKEN", "")
             token_file = TOKEN_FILE_PATH if os.path.exists(TOKEN_FILE_PATH) else "access_token.json"
-            if (not token or token.startswith("MOCK")) and os.path.exists(token_file):
+            if (not token or token.startswith("MOCK") or token.startswith("your_")) and os.path.exists(token_file):
                 with open(token_file, "r") as f:
                     tdata = json.load(f)
                     token = tdata.get("access_token", token)
-                    client_id = tdata.get("client_id", client_id)
-            if token and not token.startswith("MOCK"):
-                ctx = DhanContext(client_id, token)
-                dhan = dhanhq(ctx)
-                res = dhan.get_fund_limits()
-                data = res.get("data", {}) if isinstance(res, dict) else {}
-                avail = float(data.get("availabelBalance") or data.get("availableBalance") or 0.0)
-                wallet_str = f"Rs {avail:,.2f} INR"
-                # Sync state.json
-                from execution.state_manager import StateManager
-                sm = StateManager()
-                sm.state["current_wallet_balance"] = avail
-                sm._save_state(sm.state)
-        except Exception:
-            pass
-
-        # Fetch today's trade count from DhanHQ order book
-        trade_count = "0"
-        try:
-            from dhanhq import dhanhq, DhanContext
-            from config.settings import DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN, TOKEN_FILE_PATH
-            client_id = DHAN_CLIENT_ID or os.getenv("DHAN_CLIENT_ID", "")
-            token = DHAN_ACCESS_TOKEN or os.getenv("DHAN_ACCESS_TOKEN", "")
-            token_file = TOKEN_FILE_PATH if os.path.exists(TOKEN_FILE_PATH) else "access_token.json"
-            if (not token or token.startswith("MOCK")) and os.path.exists(token_file):
-                with open(token_file, "r") as f:
-                    tdata = json.load(f)
-                    token = tdata.get("access_token", token)
-                    client_id = tdata.get("client_id", client_id)
-            if token and not token.startswith("MOCK"):
-                ctx = DhanContext(client_id, token)
-                dhan = dhanhq(ctx)
-                res = dhan.get_order_list()
-                orders = res.get("data", []) if isinstance(res, dict) else []
-                today_str = datetime.datetime.now(IST_TZ).date().isoformat()
-                filled_today = [o for o in orders if isinstance(o, dict)
-                                and str(o.get("orderStatus", "")).upper() in ("TRADED", "FILLED", "SUCCESS", "EXECUTED")
-                                and today_str in str(o.get("createTime", ""))]
-                trade_count = str(len(filled_today))
+            avail = get_live_wallet_balance(access_token=token)
+            wallet_str = f"Rs {avail:,.2f} INR"
+            # Sync state.json
+            from execution.state_manager import StateManager
+            sm = StateManager()
+            sm.state["current_wallet_balance"] = avail
+            sm._save_state(sm.state)
         except Exception:
             pass
 
         status_msg = (
-            "[DHAN DUAL-SESSION SYSTEM STATUS]\n"
+            "[UPSTOX DUAL-SESSION SYSTEM STATUS]\n"
             "========================================\n"
             f"Active Session      : {active_session_str}\n"
             f"Session 1 (NSE)     : {'ONLINE' if nse_active else 'CLOSED (09:00 - 15:30 IST)'}\n"
             f"Session 2 (MCX)     : {'ONLINE' if mcx_active else 'CLOSED (17:00 - 23:15 IST)'}\n"
-            f"💰 [Dhan Live Wallet] Balance: {wallet_str} | Broker: DhanHQ API v2\n"
+            f"💰 [Upstox Live Wallet] Balance: {wallet_str} | Broker: Upstox API v2\n"
             f"Engine State        : {engine_state}\n"
-            f"Live Trades Today   : {trade_count}\n"
             "========================================"
         )
         _send_or_reply(bot, status_msg, reply_markup=_build_action_keyboard(telebot)) if not isinstance(status_msg, str) else _send_or_reply(bot, message, status_msg, reply_markup=_build_action_keyboard(telebot))
 
     def _save_and_verify_token(new_token: str) -> tuple:
-        """Validates token with Dhan API and updates local store if valid."""
-        import requests
-        from config.settings import DHAN_CLIENT_ID, TOKEN_FILE_PATH
-        client_id = DHAN_CLIENT_ID or os.getenv("DHAN_CLIENT_ID", "1113124878")
-        headers = {"dhan-client-id": client_id, "access-token": new_token, "Content-Type": "application/json"}
+        """Validates token with Upstox API and updates local store if valid."""
+        import upstox_client
+        from config.settings import TOKEN_FILE_PATH
         try:
-            r = requests.get("https://api.dhan.co/v2/fundlimit", headers=headers, timeout=8)
-            if r.status_code == 200:
-                data = r.json()
-                avail = float(data.get("availabelBalance") or data.get("availableBalance") or 0.0)
-                os.environ["DHAN_ACCESS_TOKEN"] = new_token
-                token_payload = {
-                    "access_token": new_token,
-                    "updated_at": datetime.datetime.now().isoformat(),
-                    "saved_timestamp": time.time(),
-                    "client_id": client_id,
-                    "expiry_prompt_sent": False
-                }
-                os.makedirs(os.path.dirname(TOKEN_FILE_PATH), exist_ok=True)
-                with open(TOKEN_FILE_PATH, "w") as f:
-                    json.dump(token_payload, f, indent=4)
-                
-                # Update state.json
-                from execution.state_manager import StateManager
-                sm = StateManager()
-                sm.state["token_saved_at"] = time.time()
-                sm.state["expiry_prompt_sent"] = False
-                sm.state["current_wallet_balance"] = avail
-                sm._save_state(sm.state)
-                
-                return True, avail, "Success"
+            configuration = upstox_client.Configuration()
+            configuration.access_token = new_token
+            api_client = upstox_client.ApiClient(configuration)
+            user_api = upstox_client.UserApi(api_client)
+            res = user_api.get_user_fund_and_margin()
+            
+            data = getattr(res, "data", res)
+            if isinstance(data, dict):
+                sec_data = data.get("SEC", {}) or data.get("equity", {})
+                avail = float(sec_data.get("available_margin", 0.0) or sec_data.get("cash", 0.0) or 0.0)
             else:
-                return False, 0.0, f"HTTP {r.status_code}: {r.text}"
+                sec_data = getattr(data, "sec", None) or getattr(data, "equity", None)
+                avail = float(getattr(sec_data, "available_margin", 0.0) if sec_data else 0.0)
+
+            os.environ["UPSTOX_ACCESS_TOKEN"] = new_token
+            token_payload = {
+                "access_token": new_token,
+                "updated_at": datetime.datetime.now().isoformat(),
+                "saved_timestamp": time.time(),
+                "expiry_prompt_sent": False
+            }
+            os.makedirs(os.path.dirname(TOKEN_FILE_PATH), exist_ok=True)
+            with open(TOKEN_FILE_PATH, "w") as f:
+                json.dump(token_payload, f, indent=4)
+            
+            # Update state.json
+            from execution.state_manager import StateManager
+            sm = StateManager()
+            sm.state["token_saved_at"] = time.time()
+            sm.state["expiry_prompt_sent"] = False
+            sm.state["current_wallet_balance"] = avail
+            sm._save_state(sm.state)
+            
+            return True, avail, "Success"
         except Exception as ex:
             return False, 0.0, str(ex)
 
@@ -588,24 +550,23 @@ def _register_handlers(bot):
         try:
             parts = message.text.strip().split()
             if len(parts) < 2:
-                bot.reply_to(message, "🔑 <b>[PASTE DHAN ACCESS TOKEN]</b>\n\nPlease paste your 24-hour Dhan Access Token directly in chat (starting with <code>eyJ...</code>) or send:\n<code>/settoken YOUR_TOKEN</code>", parse_mode="HTML")
+                bot.reply_to(message, "🔑 <b>[PASTE UPSTOX ACCESS TOKEN]</b>\n\nPlease paste your Upstox Access Token directly in chat or send:\n<code>/settoken YOUR_TOKEN</code>", parse_mode="HTML")
                 return
             new_token = parts[1].strip()
             ok, avail, err_msg = _save_and_verify_token(new_token)
             if ok:
                 msg = (
-                    "✅ <b>[DHAN ACCESS TOKEN RENEWED]</b>\n"
+                    "✅ <b>[UPSTOX ACCESS TOKEN RENEWED]</b>\n"
                     "========================================\n"
-                    f"<b>Dhan Client ID:</b> <code>1113124878</code>\n"
-                    f"<b>Available Cash:</b> <code>Rs {avail:,.2f} INR</code>\n"
+                    f"<b>Live Available Cash:</b> <code>Rs {avail:,.2f} INR</code>\n"
                     "========================================\n"
-                    "Token verified & saved successfully! Next 23-hour automated reminder scheduled."
+                    "Token verified & saved successfully! Upstox API v2 gateway ready."
                 )
                 bot.reply_to(message, msg, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
             else:
                 bot.reply_to(message, f"❌ <b>[TOKEN VALIDATION FAILED]</b>\n{err_msg}", parse_mode="HTML")
         except Exception as e:
-            _send_or_reply(bot, message, f"❌ Failed to update Dhan token: {e}")
+            _send_or_reply(bot, message, f"❌ Failed to update Upstox token: {e}")
 
     @bot.message_handler(func=lambda msg: msg.text and msg.text.strip().startswith("eyJ"))
     def handle_raw_jwt_paste(message):
@@ -614,17 +575,16 @@ def _register_handlers(bot):
             ok, avail, err_msg = _save_and_verify_token(raw_token)
             if ok:
                 msg = (
-                    "✅ <b>[DHAN ACCESS TOKEN RENEWED SUCCESSFULLY]</b>\n"
+                    "✅ <b>[UPSTOX ACCESS TOKEN RENEWED SUCCESSFULLY]</b>\n"
                     "========================================\n"
-                    f"<b>Dhan Client ID:</b> <code>1113124878</code>\n"
                     f"<b>Live Available Cash:</b> <code>Rs {avail:,.2f} INR</code>\n"
                     "========================================\n"
-                    "Token verified & saved! Your 24-hour token is active. Automated trading will continue seamlessly without interruption."
+                    "Token verified & saved! Your Upstox access token is active. Automated trading will continue seamlessly."
                 )
                 bot.reply_to(message, msg, parse_mode="HTML", reply_markup=_build_action_keyboard(telebot))
                 _safe_print("[Telegram Control] Direct JWT token paste intercepted & validated successfully.")
             else:
-                bot.reply_to(message, f"❌ <b>[INVALID DHAN TOKEN PASTED]</b>\n{err_msg}", parse_mode="HTML")
+                bot.reply_to(message, f"❌ <b>[INVALID UPSTOX TOKEN PASTED]</b>\n{err_msg}", parse_mode="HTML")
         except Exception as ex:
             bot.reply_to(message, f"❌ Error validating pasted token: {ex}")
 

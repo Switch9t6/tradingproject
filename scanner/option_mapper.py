@@ -18,77 +18,81 @@ from config.settings import (
     MCX_CRUDE_STRIKE_STEP
 )
 
-_dhan_mcx_cache = None
-_dhan_nse_cache = None
+_upstox_mcx_cache = None
+_upstox_nse_cache = None
 
 
-def get_dhan_scrip_master() -> List[str]:
-    """Downloads and caches Dhan official scrip master CSV."""
-    cache_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "dhan_scrip_master.csv")
-    if os.path.exists(cache_file):
+def get_upstox_instrument_csv(exchange: str = "NSE") -> List[str]:
+    """Downloads and caches official Upstox complete instrument CSV.gz file."""
+    cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+    gz_file = os.path.join(cache_dir, f"{exchange}.csv.gz")
+    
+    if os.path.exists(gz_file):
         try:
-            mtime = os.path.getmtime(cache_file)
-            if time.time() - mtime < 86400:
-                with open(cache_file, "r", encoding="utf-8", errors="ignore") as f:
+            mtime = os.path.getmtime(gz_file)
+            if time.time() - mtime < 86400: # 24 hour cache
+                with gzip.open(gz_file, "rt", encoding="utf-8", errors="ignore") as f:
                     return f.read().splitlines()
         except Exception:
             pass
 
     try:
-        url = "https://images.dhan.co/api-data/api-scrip-master.csv"
+        url = f"https://assets.upstox.com/market-quote/instruments/exchange/{exchange}.csv.gz"
         r = requests.get(url, timeout=15)
         if r.status_code == 200:
-            lines = r.text.splitlines()
-            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
-            with open(cache_file, "w", encoding="utf-8") as f:
-                f.write(r.text)
-            return lines
+            os.makedirs(cache_dir, exist_ok=True)
+            with open(gz_file, "wb") as f:
+                f.write(r.content)
+            with gzip.open(gz_file, "rt", encoding="utf-8", errors="ignore") as f:
+                return f.read().splitlines()
     except Exception as e:
-        print(f"[Option Mapper Notice] Could not fetch Dhan scrip master CSV: {e}")
+        print(f"[Option Mapper Notice] Could not fetch Upstox {exchange} instrument CSV: {e}")
 
     return []
 
 
-def get_dhan_mcx_instrument_map() -> dict:
-    global _dhan_mcx_cache
-    if _dhan_mcx_cache is not None:
-        return _dhan_mcx_cache
+def get_upstox_mcx_instrument_map() -> dict:
+    global _upstox_mcx_cache
+    if _upstox_mcx_cache is not None:
+        return _upstox_mcx_cache
 
-    cache_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "dhan_mcx_instruments.json")
+    cache_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "upstox_mcx_instruments.json")
     if os.path.exists(cache_file):
         try:
             mtime = os.path.getmtime(cache_file)
             if time.time() - mtime < 86400:
                 with open(cache_file, "r") as f:
-                    _dhan_mcx_cache = json.load(f)
-                    return _dhan_mcx_cache
+                    _upstox_mcx_cache = json.load(f)
+                    return _upstox_mcx_cache
         except Exception:
             pass
 
-    lines = get_dhan_scrip_master()
+    lines = get_upstox_instrument_csv("MCX")
     instr_map = {}
     if lines:
+        header = lines[0].split(",")
         for l in lines[1:]:
             parts = [p.strip('"') for p in l.split(',')]
-            if len(parts) >= 9 and parts[0] == "MCX":
-                sec_id, exch, seg, symbol, tsym, lot, strike, otype = parts[0], parts[0], parts[1], parts[3], parts[4], parts[5], parts[7], parts[8] if len(parts) >= 9 else ""
+            if len(parts) >= 11 and parts[11] == "MCX_FO" and parts[9] in ["OPTFUT", "OPTSTK"]:
                 try:
-                    sec_id_val = parts[2] if len(parts) >= 3 else parts[0]
-                    stk = float(parts[7]) if len(parts) >= 8 and parts[7] else 0.0
-                    otype = parts[8] if len(parts) >= 9 else ""
+                    instrument_key = parts[0]
+                    tsym = parts[2]
+                    lot = int(float(parts[8])) if parts[8] else 10
+                    stk = float(parts[6]) if parts[6] else 0.0
+                    otype = parts[10].upper()
                     und = "CRUDEOILM" if "CRUDEOILM" in tsym.upper() else "CRUDEOIL"
-                    key = f"{und}_{int(stk)}_{otype.upper()}"
+                    key = f"{und}_{int(stk)}_{otype}"
                     if key not in instr_map:
                         instr_map[key] = {
-                            "security_id": sec_id_val,
-                            "instrument_key": f"MCX_FO|{sec_id_val}",
+                            "instrument_key": instrument_key,
                             "tradingsymbol": tsym,
-                            "lot_size": int(lot) if lot.isdigit() else 10
+                            "lot_size": lot,
+                            "strike": stk
                         }
                 except Exception:
                     pass
 
-    _dhan_mcx_cache = instr_map
+    _upstox_mcx_cache = instr_map
     try:
         os.makedirs(os.path.dirname(cache_file), exist_ok=True)
         with open(cache_file, "w") as f:
@@ -98,47 +102,47 @@ def get_dhan_mcx_instrument_map() -> dict:
     return instr_map
 
 
-def get_dhan_nse_instrument_map() -> dict:
-    global _dhan_nse_cache
-    if _dhan_nse_cache is not None:
-        return _dhan_nse_cache
+def get_upstox_nse_instrument_map() -> dict:
+    global _upstox_nse_cache
+    if _upstox_nse_cache is not None:
+        return _upstox_nse_cache
 
-    cache_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "dhan_nse_instruments.json")
+    cache_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "upstox_nse_instruments.json")
     if os.path.exists(cache_file):
         try:
             mtime = os.path.getmtime(cache_file)
             if time.time() - mtime < 86400:
                 with open(cache_file, "r") as f:
-                    _dhan_nse_cache = json.load(f)
-                    return _dhan_nse_cache
+                    _upstox_nse_cache = json.load(f)
+                    return _upstox_nse_cache
         except Exception:
             pass
 
-    lines = get_dhan_scrip_master()
+    lines = get_upstox_instrument_csv("NSE")
     instr_map = {}
     if lines:
         for l in lines[1:]:
             parts = [p.strip('"') for p in l.split(',')]
-            if len(parts) >= 11 and parts[0] == "NSE" and parts[10] in ["CE", "PE"]:
+            if len(parts) >= 11 and parts[11] == "NSE_FO" and parts[10] in ["CE", "PE"]:
                 try:
-                    sec_id_val = parts[2]
-                    tsym = parts[5]
-                    lot = int(float(parts[6])) if parts[6] else 25
-                    stk = float(parts[9]) if parts[9] else 0.0
+                    instrument_key = parts[0]
+                    tsym = parts[2]
+                    lot = int(float(parts[8])) if parts[8] else 25
+                    stk = float(parts[6]) if parts[6] else 0.0
                     otype = parts[10].upper()
-                    und = tsym.split("-")[0].upper()
+                    und = tsym.split("-")[0].upper() if "-" in tsym else parts[3].upper()
                     key = f"{und}_{int(stk)}_{otype}"
                     if key not in instr_map:
                         instr_map[key] = {
-                            "security_id": sec_id_val,
-                            "instrument_key": f"NSE_FO|{sec_id_val}",
+                            "instrument_key": instrument_key,
                             "tradingsymbol": tsym,
-                            "lot_size": lot
+                            "lot_size": lot,
+                            "strike": stk
                         }
                 except Exception:
                     pass
 
-    _dhan_nse_cache = instr_map
+    _upstox_nse_cache = instr_map
     try:
         os.makedirs(os.path.dirname(cache_file), exist_ok=True)
         with open(cache_file, "w") as f:
@@ -149,8 +153,8 @@ def get_dhan_nse_instrument_map() -> dict:
 
 
 # Aliases for backward compatibility
-get_mcx_instrument_map = get_dhan_mcx_instrument_map
-get_nse_instrument_map = get_dhan_nse_instrument_map
+get_mcx_instrument_map = get_upstox_mcx_instrument_map
+get_nse_instrument_map = get_upstox_nse_instrument_map
 
 
 def get_mcx_crude_option_contract(
@@ -162,9 +166,9 @@ def get_mcx_crude_option_contract(
     simulated_spread_pct: float = 0.008
 ) -> Optional[Dict[str, Any]]:
     """
-    Dhan Option Contract Mapper for MCX Crude Oil Options (Standard & Mini).
+    Upstox Option Contract Mapper for MCX Crude Oil Options (Standard & Mini).
     Selects At-The-Money (ATM) Call (CE) or Put (PE) option contract.
-    Resolves Dhan's internal security_id and tradingsymbol.
+    Resolves official Upstox instrument_key and tradingsymbol.
     """
     if budget_cap is None:
         budget_cap = float("inf")
@@ -194,13 +198,25 @@ def get_mcx_crude_option_contract(
 
     total_lot_cost = round(ask_price * lot_size, 2)
 
-    mcx_map = get_dhan_mcx_instrument_map()
+    mcx_map = get_upstox_mcx_instrument_map()
     lookup_key = f"{underlying_symbol}_{int(atm_strike)}_{option_type}"
     real_info = mcx_map.get(lookup_key, {})
 
-    security_id = real_info.get("security_id", real_info.get("instrument_key", "573917"))
-    instrument_key = real_info.get("instrument_key", f"MCX_FO|{security_id}")
+    if not real_info and mcx_map:
+        prefix = f"{underlying_symbol}_"
+        candidates = []
+        for k, v in mcx_map.items():
+            if k.startswith(prefix) and k.endswith(f"_{option_type}"):
+                stk_val = float(k.split("_")[1]) if len(k.split("_")) >= 3 else 0.0
+                candidates.append((abs(stk_val - atm_strike), v))
+        if candidates:
+            candidates.sort(key=lambda x: x[0])
+            real_info = candidates[0][1]
+
+    instrument_key = real_info.get("instrument_key", f"MCX_FO|{underlying_symbol}{int(atm_strike)}{option_type}")
     option_symbol = real_info.get("tradingsymbol", f"{underlying_symbol}_{int(atm_strike)}_{option_type}")
+    if real_info.get("lot_size"):
+        lot_size = int(real_info["lot_size"])
 
     budget_approved = total_lot_cost <= budget_cap
     spread_approved = bid_ask_spread_pct <= MAX_BID_ASK_SPREAD_PCT
@@ -213,7 +229,6 @@ def get_mcx_crude_option_contract(
         "exchange": "MCX_FO",
         "is_mcx": True,
         "option_symbol": option_symbol,
-        "security_id": security_id,
         "instrument_key": instrument_key,
         "option_type": option_type,
         "strike_price": atm_strike,
@@ -229,9 +244,9 @@ def get_mcx_crude_option_contract(
         "budget_approved": budget_approved and spread_approved and delta_approved and oi_approved
     }
 
-    print("\n[Dhan MCX Option Contract Mapper]")
+    print("\n[Upstox MCX Option Contract Mapper]")
     print(f"  Mapped Contract     : {option_symbol}")
-    print(f"  Security ID         : {security_id}")
+    print(f"  Instrument Key      : {instrument_key}")
     print(f"  ATM Strike Price    : Rs {atm_strike} ({option_type}) | Delta: {estimated_delta:.2f}")
     print(f"  Bid / Ask Quote     : Rs {bid_price:.2f} / Rs {ask_price:.2f} (Spread: {bid_ask_spread_pct*100:.2f}%)")
     print(f"  Lot Size (Barrels)  : {lot_size} barrels ({'Mini' if lot_size == 10 else 'Standard'})")
@@ -251,7 +266,7 @@ def resolve_atm_option_contract(
     simulated_spread_pct: float = 0.008
 ) -> Optional[Dict[str, Any]]:
     """
-    Dhan Option Selection Guardrails for NSE Equity & MCX Commodity Candidates.
+    Upstox Option Selection Guardrails for NSE Equity & MCX Commodity Candidates.
     Routes MCX Crude Oil candidates to get_mcx_crude_option_contract().
     """
     if candidate.get("is_mcx") or candidate.get("symbol") in [MCX_CRUDE_SYMBOL, "CRUDEOILM"]:
@@ -268,7 +283,6 @@ def resolve_atm_option_contract(
         max_budget = float("inf")
     symbol = candidate["symbol"]
     spot_price = candidate["spot_price"]
-    direction = candidate["direction"]
     option_type = candidate["option_type"]
     interval = candidate["strike_interval"]
     lot_size = candidate["lot_size"]
@@ -283,7 +297,7 @@ def resolve_atm_option_contract(
     ask_price = round(estimated_premium * (1.0 + (simulated_spread_pct / 2.0)), 2)
     bid_ask_spread_pct = (ask_price - bid_price) / ask_price if ask_price > 0 else 0.0
     
-    nse_map = get_dhan_nse_instrument_map()
+    nse_map = get_upstox_nse_instrument_map()
     lookup_key = f"{symbol}_{int(atm_strike)}_{option_type}"
     real_info = nse_map.get(lookup_key, {})
 
@@ -301,8 +315,7 @@ def resolve_atm_option_contract(
     if real_info.get("lot_size"):
         lot_size = int(real_info["lot_size"])
 
-    security_id = str(real_info.get("security_id", real_info.get("instrument_key", "")))
-    instrument_key = real_info.get("instrument_key", f"NSE_FO|{security_id}")
+    instrument_key = real_info.get("instrument_key", f"NSE_FO|{symbol}{int(atm_strike)}{option_type}")
     option_symbol = real_info.get("tradingsymbol", f"{symbol}_{int(atm_strike)}_{option_type}")
 
     total_lot_cost = round(ask_price * lot_size, 2)
@@ -324,7 +337,6 @@ def resolve_atm_option_contract(
         "underlying_symbol": symbol,
         "exchange": "NSE_FO",
         "option_symbol": option_symbol,
-        "security_id": security_id,
         "instrument_key": instrument_key,
         "option_type": option_type,
         "strike_price": atm_strike,
@@ -343,9 +355,9 @@ def resolve_atm_option_contract(
     open_interest = candidate.get("open_interest", 150000)
     oi_approved = open_interest >= 100000
 
-    print("\n[Dhan Option Contract Mapper]")
+    print("\n[Upstox Option Contract Mapper]")
     print(f"  Mapped Contract     : {option_symbol}")
-    print(f"  Security ID         : {security_id}")
+    print(f"  Instrument Key      : {instrument_key}")
     print(f"  ATM Strike Price    : Rs {atm_strike} ({option_type}) | Delta: {estimated_delta:.2f}")
     print(f"  Bid / Ask Quote     : Rs {bid_price:.2f} / Rs {ask_price:.2f} (Spread: {bid_ask_spread_pct*100:.2f}%)")
     print(f"  Open Interest (OI)  : {open_interest:,} contracts")

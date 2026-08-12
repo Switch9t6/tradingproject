@@ -16,7 +16,7 @@ from config.settings import (
     MCX_CRUDE_LOT_SIZE,
     MCX_CRUDE_STRIKE_STEP,
     MCX_CRUDE_MIN_ATR,
-    DHAN_API_BASE_URL
+    UPSTOX_API_BASE_URL
 )
 
 def calculate_vwap(df: pd.DataFrame) -> pd.Series:
@@ -121,20 +121,20 @@ def calculate_supertrend(df: pd.DataFrame, period: int = 7, multiplier: float = 
 
 def fetch_mcx_crude_candles(access_token: str, days: int = 5) -> pd.DataFrame:
     """
-    Fetches real-time 5-minute candle data for MCX Crude Oil via Dhan API v2 candle endpoint.
+    Fetches real-time 5-minute candle data for MCX Crude Oil via Upstox API v2 candle endpoint.
     Falls back to simulated synthetic candle data if market is closed or API response is unavailable.
     """
     instrument_key = MCX_CRUDE_INSTRUMENT_KEY
     today_str = datetime.date.today().isoformat()
     from_date_str = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
     
-    url = f"{DHAN_API_BASE_URL}/historical-candle/{instrument_key}/5minute/{today_str}/{from_date_str}"
+    url = f"{UPSTOX_API_BASE_URL}/historical-candle/{instrument_key}/5minute/{today_str}/{from_date_str}"
     headers = {
         "Accept": "application/json",
         "Authorization": f"Bearer {access_token}"
     }
 
-    if access_token and not access_token.startswith("MOCK"):
+    if access_token and not access_token.startswith("MOCK") and not access_token.startswith("your_"):
         try:
             resp = requests.get(url, headers=headers, timeout=5)
             if resp.status_code == 200:
@@ -147,7 +147,7 @@ def fetch_mcx_crude_candles(access_token: str, days: int = 5) -> pd.DataFrame:
                     df["date"] = df["timestamp"].dt.date
                     return df
         except Exception as e:
-            print(f"[Crude Scanner Notice] Dhan Live Candle Fetch Exception: {e}")
+            print(f"[Crude Scanner Notice] Upstox Live Candle Fetch Exception: {e}")
 
     # SIMULATED / SYNTHETIC CANDLE FALLBACK FOR OFFLINE / MOCK TESTING
     print("[Crude Scanner] Generating realistic synthetic 5-min candles for MCX Crude Oil...")

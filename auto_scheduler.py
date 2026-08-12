@@ -1,6 +1,6 @@
 """
-Automated 24/7 Multi-Session Schedule Manager
-===============================================
+Automated 24/7 Multi-Session Schedule Manager (Upstox API v2)
+=============================================================
 Continuously monitors local time (IST) and automatically launches:
 1. Session 1: NSE Equity & Index Options Engine at 09:15 AM IST (Mon-Fri)
 2. Session 2: MCX Crude Oil Options Engine at 05:00 PM IST (Mon-Fri)
@@ -30,7 +30,7 @@ def run_trading_session(session_name: str):
         f"========================================\n"
         f"Session          : {session_name}\n"
         f"Execution Time   : {now_str}\n"
-        f"Mode             : LIVE REAL PRODUCTION (DHAN API V2)\n"
+        f"Mode             : LIVE REAL PRODUCTION (UPSTOX API V2)\n"
         f"========================================\n"
         f"Scanning market opportunities & executing trades automatically..."
     )
@@ -73,13 +73,12 @@ def check_token_expiry_prompt():
                     age_hours = (time.time() - saved_ts) / 3600.0
                     if age_hours >= 23.0:
                         send_telegram_alert(
-                            "🔑 <b>[DHAN ACCESS TOKEN EXPIRING IN 1 HOUR]</b>\n"
+                            "🔑 <b>[UPSTOX ACCESS TOKEN EXPIRING IN 1 HOUR]</b>\n"
                             "========================================\n"
-                            "Your 24-hour Dhan Access Token is <b>23 hours old</b> (1 hour remaining before expiry).\n\n"
+                            "Your Upstox Access Token is <b>23 hours old</b> (1 hour remaining before expiry).\n\n"
                             "<b>To keep automated trading running seamlessly:</b>\n"
-                            "1. Log in to <b><a href=\"https://web.dhan.co\">web.dhan.co</a></b> ➔ Profile ➔ Access DhanHQ API.\n"
-                            "2. Generate a fresh 24-hour Access Token.\n"
-                            "3. <b>Paste the token directly here in chat</b> (or send <code>/settoken YOUR_TOKEN</code>).\n"
+                            "1. Generate a fresh Access Token from Upstox API Portal.\n"
+                            "2. <b>Paste the token directly here in chat</b> (or send <code>/settoken YOUR_TOKEN</code>).\n"
                             "========================================"
                         )
                         tdata["expiry_prompt_sent"] = True
@@ -91,17 +90,18 @@ def check_token_expiry_prompt():
 
 def start_automated_daemon():
     print("=" * 80)
-    print("     24/7 AUTOMATED QUANTITATIVE TRADING DAEMON INITIALIZED     ")
+    print("     24/7 AUTOMATED QUANTITATIVE TRADING DAEMON INITIALIZED (UPSTOX API V2)     ")
     print("=" * 80)
     print("Schedules:")
     print("  - Session 1 (NSE Equity & Options) : Mon-Fri @ 09:15 AM IST")
     print("  - Session 2 (MCX Crude Oil Options): Mon-Fri @ 05:00 PM IST")
-    print("  - Dhan Token 23-Hour Expiry Monitor: Active Every 15 Minutes")
+    print("  - Upstox Token 23-Hour Expiry Monitor: Active Every 15 Minutes")
     print("Listening for schedule triggers...\n")
     
     send_telegram_alert(
         f"🤖 <b>[24/7 AUTOMATION ONLINE]</b>\n"
         f"========================================\n"
+        f"Broker Gateway   : Upstox API v2\n"
         f"System Status    : FULLY AUTOMATED & STANDING BY\n"
         f"Session 1 Schedule: Mon-Fri @ 09:15 AM IST (NSE)\n"
         f"Session 2 Schedule: Mon-Fri @ 05:00 PM IST (MCX)\n"

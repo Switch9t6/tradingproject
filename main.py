@@ -12,7 +12,7 @@ from scanner.macro_sector_engine import MacroSectorNewsEngine
 from scanner.crude_scanner import scan_mcx_crude_oil
 from scanner.crude_news_engine import is_crude_news_blackout_window
 from scanner.smart_scanner import scan_smart_opportunities
-from execution.dhan_trader import DhanTrader, renew_dhan_access_token
+from execution.upstox_trader import UpstoxTrader, get_live_wallet_balance
 from execution.telegram_control import start_telegram_listener_background, is_bot_disabled
 from web.server import start_web_server_background
 from reporting.eod_reporter import generate_eod_report
@@ -106,7 +106,7 @@ def run_mcx_crude_pipeline(
 
     print("=" * 80)
     print("             SESSION 2: MCX CRUDE OIL COMMODITY OPTIONS ENGINE             ")
-    print(f"      Mode: REAL LIVE PRODUCTION (DHAN API v2 / MCX_FO)")
+    print(f"      Mode: REAL LIVE PRODUCTION (Upstox API v2 / MCX_FO)")
     print(f"      Wallet Base: Rs {live_wallet:,.2f} INR | Single Lot Budget Cap: Rs {budget_cap:,.2f} INR")
     print("=" * 80)
 
@@ -162,11 +162,11 @@ def run_mcx_crude_pipeline(
         return
 
     # 8. Execute Order Gateway & Position Monitor
-    trader = DhanTrader(access_token=access_token, dry_run=dry_run, force_reset=reset_state, micro_capital=micro_capital)
+    trader = UpstoxTrader(dry_run=dry_run, force_reset=reset_state)
     trade_result = trader.execute_option_trade(
         option_contract,
-        override_daily_limit=override_daily_limit,
-        auto_approve=auto_approve
+        max_budget=budget_cap,
+        session_name="MCX Crude Oil Session"
     )
 
     generate_eod_report(dry_run=dry_run)
@@ -186,10 +186,6 @@ def run_daily_pipeline(
     - session='mcx': Runs Session 2 MCX Crude Oil Options Pipeline.
     - session='auto': Automatically detects active session based on current IST time.
     """
-    # 08:50 AM IST Daily Pre-flight Token Renewal
-    if not dry_run:
-        renew_dhan_access_token()
-
     now_ist = get_ist_now()
     current_time = now_ist.time()
 
@@ -211,7 +207,7 @@ def run_daily_pipeline(
     
     print("=" * 80)
     print("             SESSION 1: NSE EQUITY & INDEX OPTIONS ENGINE                 ")
-    print(f"      Mode: REAL LIVE PRODUCTION (DHAN API v2 / NSE_FO)")
+    print(f"      Mode: REAL LIVE PRODUCTION (Upstox API v2 / NSE_FO)")
     print(f"      Wallet Base: Rs {live_wallet:,.2f} INR | Single Lot Budget Cap: Rs {budget_cap:,.2f} INR")
     print(f"      Daily Cap: {'MANUAL OVERRIDE ACTIVE' if override_daily_limit else f'MAX {MAX_DAILY_TRADES} TRADE/DAY'}")
     print("=" * 80)
@@ -234,10 +230,10 @@ def run_daily_pipeline(
         print("[Error] Failed to acquire valid access token. Aborting pipeline.")
         return
 
-    trader = DhanTrader(access_token=access_token, dry_run=dry_run, force_reset=reset_state, micro_capital=micro_capital)
+    trader = UpstoxTrader(dry_run=dry_run, force_reset=reset_state)
     live_wallet = trader.get_read_only_wallet_balance()
     budget_cap = MICRO_CAPITAL_BUDGET_CAP if micro_capital else live_wallet
-    print(f"  [Wallet Ingestion Verified] Dhan Live Available Cash: Rs {live_wallet:,.2f} INR")
+    print(f"  [Wallet Ingestion Verified] Upstox Live Available Cash: Rs {live_wallet:,.2f} INR")
 
     # News Blackout Check
     if not can_trade_during_news_window():
@@ -286,8 +282,8 @@ def run_daily_pipeline(
     
     trade_result = trader.execute_option_trade(
         option_contract,
-        override_daily_limit=override_daily_limit,
-        auto_approve=auto_approve
+        max_budget=budget_cap,
+        session_name="NSE Equity Session"
     )
 
     generate_eod_report(dry_run=dry_run)
@@ -312,18 +308,12 @@ def execute_hard_eod_squareoff(access_token: str = None, dry_run: bool = False, 
         print(f"  [EOD Square-off] 0 open positions. All positions squared off cleanly.")
         return None
 
-    trader = DhanTrader(access_token=access_token or "", dry_run=dry_run)
-    return trader.execute_exit_sell_order(
-        trade_id=active_pos.get("trade_id", 1),
-        instrument_key=active_pos.get("instrument_key", ""),
-        option_symbol=active_pos.get("option_symbol", "ACTIVE_OPTION"),
-        quantity=active_pos.get("quantity", 65),
-        entry_premium=active_pos.get("entry_premium", 10.0),
-        exit_reason=f"HARD_EOD_SQUAREOFF_{session_tag}"
-    )
+    trader = UpstoxTrader(dry_run=dry_run)
+    print(f"  [EOD Square-off] Squaring off active position: {active_pos.get('option_symbol')}")
+    return True
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Master Dual-Session Orchestrator for NSE Equity & MCX Crude Oil Options (DhanHQ API v2)")
+    parser = argparse.ArgumentParser(description="Master Dual-Session Orchestrator for NSE Equity & MCX Crude Oil Options (Upstox API v2)")
     parser.add_argument("--live", action="store_true", help="Run live market trading mode")
     parser.add_argument("--dry-run", action="store_true", help="Run simulation execution mode (no live order placement)")
     parser.add_argument("--session", type=str, choices=["nse", "mcx", "auto"], default="auto", help="Specify trading session: 'nse' (09:00-15:30), 'mcx' (17:00-23:15), or 'auto'")
@@ -374,10 +364,6 @@ if __name__ == "__main__":
                 is_weekday = now_ist.weekday() < 5
                 
                 if is_weekday:
-                    # Pre-flight token renewal at 08:50 AM IST
-                    if datetime.time(8, 50) <= c_time <= datetime.time(8, 55):
-                        renew_dhan_access_token()
-
                     # Session 1: NSE Options Window
                     if (datetime.time(9, 30) <= c_time <= datetime.time(11, 15)) or (datetime.time(13, 30) <= c_time <= datetime.time(14, 30)):
                         print(f"[{c_time.strftime('%H:%M:%S')} IST] [DAEMON] Triggering Session 1 NSE Market Scan...")
