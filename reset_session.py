@@ -9,6 +9,16 @@ from config.settings import STATE_FILE_PATH, DB_FILE_PATH, INITIAL_WALLET_CAPITA
 
 today = datetime.date.today().isoformat()
 
+# Try querying live Upstox wallet balance if available
+live_wallet = INITIAL_WALLET_CAPITAL
+try:
+    from execution.upstox_trader import get_live_wallet_balance
+    wb = get_live_wallet_balance()
+    if wb > 0:
+        live_wallet = wb
+except Exception:
+    pass
+
 # 1. Reset state.json completely
 clean_state = {
     "date": today,
@@ -18,7 +28,7 @@ clean_state = {
     "is_mcx_locked_today": False,
     "active_trade_id": None,
     "active_position": None,
-    "current_wallet_balance": INITIAL_WALLET_CAPITAL,
+    "current_wallet_balance": live_wallet,
     "session_cap_alerted": {}
 }
 os.makedirs(os.path.dirname(STATE_FILE_PATH), exist_ok=True)

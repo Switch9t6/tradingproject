@@ -205,6 +205,13 @@ def get_live_wallet_balance(access_token: Optional[str] = None) -> float:
 
             if avail > 0:
                 print(f"[Upstox Live Wallet] Real-Time Available Cash Balance: Rs {avail:,.2f} INR.")
+                try:
+                    from execution.state_manager import StateManager
+                    sm = StateManager()
+                    sm.state["current_wallet_balance"] = avail
+                    sm._save_state(sm.state)
+                except Exception:
+                    pass
                 return avail
         except ApiException as e:
             if e.status == 401 and attempt == 0:
@@ -216,7 +223,12 @@ def get_live_wallet_balance(access_token: Optional[str] = None) -> float:
             print(f"[Upstox Wallet Warning] Failed to fetch live wallet balance: {ex}")
             break
 
-    return INITIAL_WALLET_CAPITAL
+    # Fallback to StateManager's recorded balance if live API query was throttled
+    try:
+        from execution.state_manager import StateManager
+        return StateManager().get_current_wallet_balance()
+    except Exception:
+        return INITIAL_WALLET_CAPITAL
 
 
 def place_aggressive_limit_order(
