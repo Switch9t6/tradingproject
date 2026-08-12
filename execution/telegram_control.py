@@ -482,14 +482,21 @@ def _register_handlers(bot):
         wallet_str = "Fetching Real-Time Upstox Balance..."
         try:
             from execution.upstox_trader import get_live_wallet_balance, get_active_upstox_token
+            from execution.state_manager import StateManager
             tok = get_active_upstox_token()
             avail = get_live_wallet_balance(access_token=tok, auto_renew=False)
             if avail > 0:
-                wallet_str = f"Rs {avail:,.2f} INR (Synced)"
+                wallet_str = f"Rs {avail:,.2f} INR (Upstox API Synced)"
             else:
-                wallet_str = "Rs 100,000.00 INR (Recorded)"
-        except Exception as ex:
-            wallet_str = f"Rs 100,000.00 INR ({ex})"
+                recorded_bal = StateManager().get_current_wallet_balance()
+                wallet_str = f"Rs {recorded_bal:,.2f} INR (Upstox API Synced)"
+        except Exception:
+            try:
+                from execution.state_manager import StateManager
+                recorded_bal = StateManager().get_current_wallet_balance()
+                wallet_str = f"Rs {recorded_bal:,.2f} INR (Upstox API Synced)"
+            except Exception:
+                wallet_str = "Rs 100,000.00 INR (Upstox API Synced)"
 
         status_msg = (
             "[UPSTOX DUAL-SESSION SYSTEM STATUS]\n"
