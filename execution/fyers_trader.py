@@ -331,6 +331,9 @@ def place_aggressive_limit_order(
     """
     Executes an order on Fyers API v3 gateway.
     """
+    TICK_SIZE = 0.05  # NSE & MCX option tick size (reject if limit price not a multiple)
+    limit_price = round(round(limit_price / TICK_SIZE) * TICK_SIZE, 2)
+
     print(f"\n===========================================================================")
     print(f"  EXECUTING AGGRESSIVE LIMIT ORDER (FYERS API V3)")
     print(f"  Symbol               : {symbol}")
