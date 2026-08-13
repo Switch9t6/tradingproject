@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import asyncio
+import threading
 import datetime
 import requests
 from typing import Tuple, Dict, Any, Optional
@@ -179,3 +180,205 @@ class AsyncUpstoxMarketFeedMonitor:
                 await asyncio.sleep(backoff_delay)
 
         return self.monitor.entry_premium, "MONITOR_STOPPED"
+
+
+# ---------------------------------------------------------------------------
+# LIVE FYERS POSITION MONITOR
+# ---------------------------------------------------------------------------
+IST_TZ = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+
+_POLL_INTERVAL_SECONDS = 5.0
+# Hand the position back to the EOD square-off once these times are reached.
+_MONITOR_CUTOFFS = {
+    "NSE_FO": datetime.time(15, 15),
+    "MCX_FO": datetime.time(23, 0),
+}
+
+
+def _monitor_cutoff_time(exchange: str) -> datetime.time:
+    return _MONITOR_CUTOFFS.get(str(exchange).upper(), datetime.time(23, 0))
+
+
+def _get_ist_now() -> datetime.datetime:
+    return datetime.datetime.now(IST_TZ)
+
+
+def _build_fyers_client(access_token: str):
+    """Creates a lightweight Fyers client for LTP polling (or None in dry/MOCK mode)."""
+    if not access_token or access_token.startswith("MOCK"):
+        return None
+    try:
+        from fyers_apiv3 import fyersModel
+        from config.settings import FYERS_APP_ID, TOKEN_FILE_PATH
+        app_id = (FYERS_APP_ID or "").strip()
+        if not app_id:
+            return None
+        return fyersModel.FyersModel(
+            client_id=app_id,
+            token=access_token,
+            is_async=False,
+            log_path=os.path.dirname(TOKEN_FILE_PATH),
+        )
+    except Exception as e:
+        print(f"  [Position Monitor Client Notice] {e}")
+        return None
+
+
+def _fetch_ltp(fyers_client, symbol: str) -> float:
+    """Polls live LTP for the held symbol. Returns 0.0 on failure (treated as invalid tick)."""
+    if fyers_client is None:
+        return 0.0
+    try:
+        q = fyers_client.quotes(data={"symbols": symbol})
+        if isinstance(q, dict) and q.get("s") == "ok" and q.get("d"):
+            return float(q["d"][0].get("v", {}).get("lp", 0) or 0)
+    except Exception as e:
+        print(f"  [Position Monitor LTP Notice] {e}")
+    return 0.0
+
+
+def _execute_exit(symbol: str, quantity: int, trade_id: str, tick_size: float,
+                  access_token: str, dry_run: bool, exit_price: float, reason: str) -> bool:
+    """
+    Places the SELL exit for a triggered TSL/target/stop, records the closed trade,
+    and notifies Telegram. Retries once if the first exit order stays PENDING.
+    """
+    from execution.fyers_trader import place_aggressive_limit_order
+    from execution.state_manager import StateManager
+
+    res = None
+    for attempt in range(1, 3):
+        res = place_aggressive_limit_order(
+            symbol=symbol,
+            quantity=quantity,
+            transaction_type="SELL",
+            product_type="INTRADAY",
+            limit_price=exit_price,
+            dry_run=dry_run,
+            access_token=access_token,
+            tick_size=tick_size,
+            fill_timeout_seconds=10,
+        )
+        if res.get("status") == "TRADED":
+            filled = float(res.get("filled_price") or exit_price)
+            StateManager().record_exit_trade(trade_id=trade_id, exit_premium=filled, exit_reason=reason)
+            print(f"  [Position Monitor] EXITED #{trade_id}: {reason} @ Rs {filled:.2f} "
+                  f"(order {res.get('order_id')})")
+            try:
+                from reporting.telegram_bot import send_telegram_message
+                send_telegram_message(
+                    f"💰 <b>[POSITION EXIT - {reason}]</b>\n"
+                    f"<b>Symbol :</b> <code>{symbol}</code>\n"
+                    f"<b>Qty    :</b> {quantity}\n"
+                    f"<b>Exit   :</b> Rs {filled:.2f}\n"
+                    f"<b>Order  :</b> <code>{res.get('order_id')}</code>"
+                )
+            except Exception as notify_err:
+                print(f"  [Position Monitor Notify Notice] {notify_err}")
+            return True
+
+        if res.get("status") == "PENDING":
+            print(f"  [Position Monitor] Exit order pending (attempt {attempt}). Retrying in 5s...")
+            time.sleep(5)
+            continue
+
+        # REJECTED
+        print(f"  [Position Monitor] Exit order rejected: {res.get('status')} -> {res.get('remarks')}")
+        break
+
+    try:
+        from reporting.telegram_bot import send_telegram_message
+        send_telegram_message(
+            f"⚠️ <b>[POSITION EXIT FAILED]</b>\n"
+            f"<b>Symbol :</b> <code>{symbol}</code>\n"
+            f"<b>Reason :</b> {reason}\n"
+            f"<b>Status :</b> {res.get('status') if res else 'N/A'} -> "
+            f"{res.get('remarks') if res else 'unknown'}\n"
+            "Position remains OPEN. EOD square-off will retry at the close."
+        )
+    except Exception as notify_err:
+        print(f"  [Position Monitor Notify Notice] {notify_err}")
+    return False
+
+
+def start_position_monitor(symbol: str, quantity: int, trade_id: str, entry_premium: float,
+                           target_p: float, stop_p: float, tick_size: float = 0.05,
+                           access_token: str = None, dry_run: bool = False,
+                           exchange: str = "NSE_FO",
+                           poll_interval: float = _POLL_INTERVAL_SECONDS) -> Optional[threading.Thread]:
+    """
+    Spawns a daemon thread that polls the held option's live LTP and enforces
+    target / trailing stop-loss / base stop-loss / time-decay exits for this trade.
+    """
+    thread = threading.Thread(
+        target=_run_position_monitor,
+        kwargs={
+            "symbol": symbol,
+            "quantity": quantity,
+            "trade_id": trade_id,
+            "entry_premium": entry_premium,
+            "target_p": target_p,
+            "stop_p": stop_p,
+            "tick_size": tick_size,
+            "access_token": access_token,
+            "dry_run": dry_run,
+            "exchange": exchange,
+            "poll_interval": poll_interval,
+        },
+        daemon=True,
+        name=f"posmon-{trade_id}",
+    )
+    thread.start()
+    print(f"[Position Monitor] Monitoring {symbol} (trade #{trade_id}) every {poll_interval:.0f}s. "
+          f"Target Rs {target_p:.2f} | Stop Rs {stop_p:.2f}")
+    return thread
+
+
+def _run_position_monitor(symbol: str, quantity: int, trade_id: str, entry_premium: float,
+                          target_p: float, stop_p: float, tick_size: float,
+                          access_token: str, dry_run: bool, exchange: str,
+                          poll_interval: float) -> None:
+    monitor = PositionMonitor(entry_premium=entry_premium, target_p=target_p, initial_stop_p=stop_p)
+    cutoff = _monitor_cutoff_time(exchange)
+    fyers_client = _build_fyers_client(access_token)
+
+    while True:
+        try:
+            now = _get_ist_now()
+            if now.weekday() >= 5:
+                print(f"  [Position Monitor #{trade_id}] Weekend detected. Monitoring stopped (EOD handoff).")
+                break
+            if now.time() >= cutoff:
+                print(f"  [Position Monitor #{trade_id}] Reached EOD handoff ({cutoff:%H:%M} IST). "
+                      "EOD square-off will close the position.")
+                break
+
+            # Stop if the position is no longer tracked (closed via /squareoff, EOD, or externally).
+            try:
+                from execution.state_manager import StateManager
+                ap = StateManager().state.get("active_position") or {}
+                if not ap or ap.get("trade_id") != trade_id:
+                    print(f"  [Position Monitor #{trade_id}] Position no longer active. Monitoring stopped.")
+                    break
+            except Exception:
+                pass
+
+            try:
+                from execution.telegram_control import is_bot_disabled
+                halted = is_bot_disabled()
+            except Exception:
+                halted = False
+
+            ltp = _fetch_ltp(fyers_client, symbol)
+            elapsed = time.time() - monitor.entry_time
+            is_exit, exit_price, reason = monitor.evaluate_tick(ltp, elapsed)
+            if is_exit:
+                if halted:
+                    print(f"  [Position Monitor #{trade_id}] Exit signal ({reason}) but kill switch active. "
+                          "Deferring placement to EOD square-off.")
+                    break
+                _execute_exit(symbol, quantity, trade_id, tick_size, access_token, dry_run, exit_price, reason)
+                break
+        except Exception as e:
+            print(f"  [Position Monitor #{trade_id} Error] {e}")
+        time.sleep(poll_interval)

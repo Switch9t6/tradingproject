@@ -687,6 +687,25 @@ class FyersTrader:
                 "status": "OPEN",
                 "exchange": exchange
             }
+
+            # Start background TSL / target / stop-loss monitoring for this position.
+            try:
+                from execution.position_monitor import start_position_monitor
+                start_position_monitor(
+                    symbol=symbol,
+                    quantity=lot_size,
+                    trade_id=trade_id,
+                    entry_premium=filled_price,
+                    target_p=target_p,
+                    stop_p=stop_p,
+                    tick_size=float(option_contract.get("tick_size") or 0.05),
+                    access_token=self.access_token,
+                    dry_run=self.dry_run,
+                    exchange=exchange,
+                )
+            except Exception as mon_err:
+                print(f"[Position Monitor Start Notice] {mon_err}")
+
             return result
         elif order_res.get("status") in ("PENDING", "DISPATCHED"):
             # Order was accepted but fill is unconfirmed: do NOT record an OPEN
