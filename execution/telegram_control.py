@@ -441,6 +441,9 @@ def _register_handlers(bot):
         try:
             if os.path.exists(BOT_DISABLED_FLAG):
                 os.remove(BOT_DISABLED_FLAG)
+            halt_alert_flag = "logs/halt_alert_sent.flag"
+            if os.path.exists(halt_alert_flag):
+                os.remove(halt_alert_flag)
             from execution.state_manager import StateManager
             sm = StateManager()
             sm.state["is_nse_locked_today"] = False

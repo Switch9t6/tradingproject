@@ -65,7 +65,17 @@ def security_audit_check():
         sys.exit("[CRITICAL SECURITY ERROR] Security audit failed. Execution halted.")
 
 def _halt_engine_and_alert_telegram(reason: str):
-    """Halts the trading engine for the day and sends an urgent Telegram warning."""
+    """Halts the trading engine for the day and sends an urgent Telegram warning ONCE."""
+    halt_flag = "logs/bot_disabled.flag"
+    halt_alert_flag = "logs/halt_alert_sent.flag"
+
+    try:
+        os.makedirs("logs", exist_ok=True)
+        with open(halt_flag, "w") as f:
+            f.write(f"PAUSED: {reason}")
+    except Exception:
+        pass
+
     try:
         from execution.state_manager import StateManager
         sm = StateManager()
@@ -74,6 +84,11 @@ def _halt_engine_and_alert_telegram(reason: str):
         sm._save_state(sm.state)
     except Exception:
         pass
+
+    # USER DIRECTIVE RULE: Send halt message ONCE. Do not repeat unless /start or /resume is used.
+    if os.path.exists(halt_alert_flag):
+        print(f"[Halt Gate] System is halted ({reason}). Halt notification already sent to Telegram. Suppressing repeat message.")
+        return
 
     try:
         from reporting.telegram_bot import send_telegram_message
@@ -86,6 +101,8 @@ def _halt_engine_and_alert_telegram(reason: str):
             "⚠️ <i>TRADING ENGINE PAUSED FOR SAFETY. Please verify Fyers credentials and send /resume on Telegram once verified.</i>"
         )
         send_telegram_message(msg)
+        with open(halt_alert_flag, "w") as f:
+            f.write(datetime.datetime.now().isoformat())
     except Exception:
         pass
 
