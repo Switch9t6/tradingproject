@@ -434,24 +434,28 @@ def execute_hard_eod_squareoff(access_token: str = None, dry_run: bool = False, 
     Hard EOD Square-Off Enforcement:
     - Session 1 (NSE): Runs at 15:15 IST
     - Session 2 (MCX): Runs at 23:00 IST
-    Forcibly closes any active intraday MIS option position before market close.
+    Forcibly closes any active intraday MIS option position before market close
+    by placing a marketable SELL limit order and settling P&L in StateManager.
     """
-    import json
-    from config.settings import TOKEN_FILE_PATH
-    from execution.state_manager import StateManager
-
     print(f"\n[{session_tag} IST] HARD EOD SQUARE-OFF ENFORCEMENT RUNNING...")
-    sm = StateManager()
-    active_pos = sm.state.get("active_position")
 
-    if not active_pos:
+    from execution.fyers_trader import square_off_active_position
+    res = square_off_active_position(
+        access_token=access_token,
+        dry_run=dry_run,
+        exit_reason=f"EOD_SQUAREOFF_{session_tag}",
+        exit_timeout_seconds=15
+    )
+
+    if res.get("status") == "no_position":
         print(f"  [EOD Square-off] 0 open positions. All positions squared off cleanly.")
-        return None
-
-    from execution.fyers_trader import FyersTrader
-    trader = FyersTrader(dry_run=dry_run)
-    print(f"  [EOD Square-off] Squaring off active position: {active_pos.get('option_symbol')}")
-    return True
+    elif res.get("status") == "TRADED":
+        print(f"  [EOD Square-off] Active position closed @ Rs {res.get('exit_premium')} "
+              f"(order {res.get('order_id')}). P&L settled.")
+    else:
+        print(f"  [EOD Square-off] WARNING: position could not be closed: "
+              f"{res.get('status')} -> {res.get('remarks')}")
+    return res
 
 def print_server_public_ip():
     """Prints the outgoing public IP address of the current running server/host."""

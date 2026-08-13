@@ -319,6 +319,35 @@ def get_live_wallet_balance(access_token: Optional[str] = None, auto_renew: bool
         return INITIAL_WALLET_CAPITAL
 
 
+def _poll_order_fill(fyers, order_id: str, qty: int, timeout_seconds: float) -> Dict[str, Any]:
+    """
+    Polls the Fyers orderbook until the order fills, is rejected, or times out.
+    Returns {"status": "TRADED"|"REJECTED"|"PENDING", ...}.
+    Fyers orderbook 'status' codes: 1=Cancelled, 2=Complete, 3=Rejected, 4=Pending.
+    """
+    deadline = time.time() + max(5.0, timeout_seconds)
+    last_status = "4"
+    while time.time() < deadline:
+        try:
+            ob = fyers.orderbook()
+            if isinstance(ob, dict) and ob.get("s") == "ok":
+                for o in ob.get("orderBook", []):
+                    if o.get("orderId") != order_id:
+                        continue
+                    status = str(o.get("status", ""))
+                    last_status = status
+                    filled_qty = int(o.get("filledQty", 0) or 0)
+                    avg_price = float(o.get("avgPrice", 0) or 0)
+                    if filled_qty >= qty:
+                        return {"status": "TRADED", "filled_price": avg_price if avg_price > 0 else None, "order_status": status}
+                    if status in ("1", "3", "Cancelled", "Rejected", "CANCELLED", "REJECTED"):
+                        return {"status": "REJECTED", "message": f"order_status={status}", "order_status": status}
+        except Exception as poll_err:
+            print(f"[FYERS FILL POLL WARNING] {poll_err}")
+        time.sleep(2)
+    return {"status": "PENDING", "order_status": last_status}
+
+
 def place_aggressive_limit_order(
     symbol: str,
     quantity: int,
@@ -327,7 +356,9 @@ def place_aggressive_limit_order(
     limit_price: float = 0.0,
     dry_run: bool = False,
     access_token: Optional[str] = None,
-    tick_size: float = 0.05
+    tick_size: float = 0.05,
+    poll_for_fill: bool = True,
+    fill_timeout_seconds: Optional[float] = None
 ) -> Dict[str, Any]:
     """
     Executes an order on Fyers API v3 gateway.
@@ -391,14 +422,44 @@ def place_aggressive_limit_order(
         print(f"[FYERS ORDER RESPONSE] {response}")
         
         if isinstance(response, dict) and response.get("s") == "ok":
-            order_id = response.get("id")
+            order_id = response.get("id") or response.get("orderid")
+            if not order_id:
+                return {"status": "REJECTED", "order_id": None, "remarks": "Order accepted by broker but no order id returned"}
+
+            if not poll_for_fill:
+                return {
+                    "status": "DISPATCHED",
+                    "order_id": order_id,
+                    "filled_price": limit_price,
+                    "quantity": quantity,
+                    "symbol": symbol,
+                    "remarks": "Order dispatched to broker (fill pending confirmation)"
+                }
+
+            timeout = fill_timeout_seconds if fill_timeout_seconds is not None else LIMIT_ORDER_TIMEOUT_SECONDS
+            fill = _poll_order_fill(fyers, order_id, quantity, timeout)
+
+            if fill["status"] == "TRADED":
+                return {
+                    "status": "TRADED",
+                    "order_id": order_id,
+                    "filled_price": fill.get("filled_price") or limit_price,
+                    "quantity": quantity,
+                    "symbol": symbol,
+                    "remarks": f"Order filled (broker status: {fill.get('order_status')})"
+                }
+            if fill["status"] == "REJECTED":
+                return {
+                    "status": "REJECTED",
+                    "order_id": order_id,
+                    "remarks": f"Order rejected by broker after dispatch: {fill.get('message')}"
+                }
             return {
-                "status": "TRADED",
+                "status": "PENDING",
                 "order_id": order_id,
-                "filled_price": limit_price,
                 "quantity": quantity,
                 "symbol": symbol,
-                "remarks": "Order Dispatched Successfully"
+                "remarks": f"Order still pending after {timeout:.0f}s (broker status: {fill.get('order_status')})"
             }
         else:
             remarks = response.get("message", str(response)) if isinstance(response, dict) else str(response)
@@ -477,6 +538,23 @@ class FyersTrader:
                 "exchange": exchange
             }
             return result
+        elif order_res.get("status") in ("PENDING", "DISPATCHED"):
+            # Order was accepted but fill is unconfirmed: do NOT record an OPEN
+            # position or consume the session cap on a fill that never happened.
+            print(f"[Fyers Execution Pending] Order {order_res.get('order_id')} not yet filled: {order_res.get('remarks')}")
+            return {
+                "trade_id": None,
+                "order_id": order_res.get("order_id"),
+                "instrument_key": symbol,
+                "option_symbol": option_contract["option_symbol"],
+                "entry_premium": None,
+                "quantity": lot_size,
+                "target_price": None,
+                "stop_price": None,
+                "status": order_res.get("status"),
+                "exchange": exchange,
+                "remarks": order_res.get("remarks")
+            }
         else:
             status = order_res.get("status", "REJECTED")
             remarks = order_res.get("remarks", "Order not filled")
@@ -533,3 +611,280 @@ def handle_execution_issue_and_halt(issue_title: str, detailed_reason: str, symb
         send_telegram_message(msg)
     except Exception as tele_err:
         print(f"[Execution Issue Telegram Notice] {tele_err}")
+
+
+def _close_uncovered_positions(
+    access_token: Optional[str] = None,
+    dry_run: bool = False,
+    exit_reason: str = "EOD_SQUAREOFF",
+    exit_timeout_seconds: Optional[float] = None,
+    send_telegram_alert: bool = True,
+) -> Dict[str, Any]:
+    """
+    Safety net: reconciles against Fyers positions() and closes any open option
+    position that is NOT tracked in local state (e.g. an entry that filled after
+    the fill-poll timeout). Best-effort; never halts on parsing issues.
+    """
+    tok = access_token or get_active_fyers_token()
+    if not tok or tok.startswith("MOCK"):
+        print("  [Square-off] No valid token; skipping broker reconciliation.")
+        return {"status": "no_position"}
+
+    try:
+        app_id = FYERS_APP_ID or os.getenv("FYERS_APP_ID", "").strip()
+        fyers = fyersModel.FyersModel(client_id=app_id, token=tok, is_async=False, log_path=os.path.dirname(TOKEN_FILE_PATH))
+        res = fyers.positions()
+    except Exception as pos_err:
+        print(f"  [Square-off] Broker positions query failed: {pos_err}")
+        return {"status": "error", "message": f"Broker positions query failed: {pos_err}"}
+
+    if not (isinstance(res, dict) and res.get("s") == "ok"):
+        print(f"  [Square-off] Broker positions query returned: {res}")
+        return {"status": "no_position"}
+
+    open_positions = []
+    for p in res.get("netPositions", []):
+        if not isinstance(p, dict):
+            continue
+        symbol = str(p.get("symbol") or "").strip()
+        net_qty = int(p.get("netQty", 0) or 0)
+        if symbol and net_qty != 0:
+            open_positions.append({"symbol": symbol, "net_qty": net_qty})
+
+    if not open_positions:
+        print("  [Square-off] 0 open positions on broker. All positions squared off cleanly.")
+        return {"status": "no_position"}
+
+    print(f"  [Square-off] Broker shows {len(open_positions)} open position(s) not in local state. Closing...")
+    closed = []
+    for pos in open_positions:
+        symbol = pos["symbol"]
+        qty = abs(pos["net_qty"])
+        if pos["net_qty"] < 0:
+            print(f"  [Square-off] Skipping short position (not owned): {symbol} ({pos['net_qty']})")
+            continue
+
+        # Resolve tick size from the instrument maps
+        tick_size = 0.05
+        try:
+            prefix = symbol.split(":")[0] if ":" in symbol else "NSE"
+            if prefix == "MCX":
+                from scanner.option_mapper import get_fyers_mcx_instrument_map
+                inst_map = get_fyers_mcx_instrument_map()
+            else:
+                from scanner.option_mapper import get_fyers_nse_instrument_map
+                inst_map = get_fyers_nse_instrument_map()
+            for entry in inst_map.values():
+                if isinstance(entry, dict) and entry.get("fyers_symbol") == symbol:
+                    tick_size = float(entry.get("tick_size") or 0.05)
+                    break
+        except Exception:
+            pass
+
+        # Marketable SELL limit off current LTP
+        ltp = 0.0
+        try:
+            q = fyers.quotes(data={"symbols": symbol})
+            if isinstance(q, dict) and q.get("s") == "ok" and q.get("d"):
+                ltp = float(q["d"][0].get("v", {}).get("lp", 0) or 0)
+        except Exception as quote_err:
+            print(f"  [Square-off] LTP fetch failed for {symbol}: {quote_err}")
+        exit_limit = (ltp - max(tick_size, ltp * 0.005)) if ltp > 0 else 0.05
+
+        order_res = place_aggressive_limit_order(
+            symbol=symbol,
+            quantity=qty,
+            transaction_type="SELL",
+            product_type="INTRADAY",
+            limit_price=exit_limit,
+            dry_run=dry_run,
+            access_token=tok,
+            tick_size=tick_size,
+            fill_timeout_seconds=exit_timeout_seconds
+        )
+
+        trade_id = 0
+        if order_res.get("status") == "TRADED":
+            # Match an OPEN row in the DB so P&L can be settled
+            try:
+                sm = StateManager()
+                rows = sm.get_today_trades()
+                for r in rows:
+                    if r.get("status") == "OPEN" and symbol.endswith(str(r.get("option_symbol", "")).split(":")[-1]):
+                        trade_id = int(r.get("id") or 0)
+                        break
+            except Exception:
+                pass
+            if trade_id:
+                sm.record_exit_trade(trade_id=trade_id, exit_premium=float(order_res.get("filled_price") or exit_limit), exit_reason=exit_reason)
+            else:
+                sm.state["active_position"] = None
+                sm.state["active_trade_id"] = None
+                sm._save_state(sm.state)
+        closed.append({"symbol": symbol, "status": order_res.get("status"), "order_id": order_res.get("order_id"), "trade_id": trade_id})
+
+        if send_telegram_alert:
+            try:
+                from reporting.telegram_bot import send_telegram_message
+                send_telegram_message(
+                    "✅ <b>[UNTRACKED POSITION CLOSED]</b>\n"
+                    f"<b>Symbol :</b> <code>{symbol}</code>\n"
+                    f"<b>Qty    :</b> {qty}\n"
+                    f"<b>Status :</b> {order_res.get('status')} (order {order_res.get('order_id')})\n"
+                    f"<b>Reason :</b> {exit_reason}"
+                )
+            except Exception:
+                pass
+
+    return {"status": "closed_uncovered", "positions": closed}
+
+
+def resolve_squareoff_symbol(active_position: Dict[str, Any]) -> tuple:
+    """
+    Returns the full Fyers symbol + tick size needed to close an active position.
+    Uses the fyers_symbol stored at entry time; falls back to a best-effort lookup
+    in the Fyers instrument maps for positions recorded before that field existed.
+    """
+    sym = str(active_position.get("fyers_symbol") or "").strip()
+    tick = float(active_position.get("tick_size") or 0.05)
+    if sym:
+        return sym, tick
+
+    option_symbol = str(active_position.get("option_symbol") or "").strip()
+    exchange = str(active_position.get("exchange") or "").upper()
+    prefix = "MCX" if "MCX" in exchange else "NSE"
+    candidate = f"{prefix}:{option_symbol}"
+    if not option_symbol:
+        return candidate, tick
+
+    try:
+        if prefix == "MCX":
+            from scanner.option_mapper import get_fyers_mcx_instrument_map
+            inst_map = get_fyers_mcx_instrument_map()
+        else:
+            from scanner.option_mapper import get_fyers_nse_instrument_map
+            inst_map = get_fyers_nse_instrument_map()
+        for entry in inst_map.values():
+            if isinstance(entry, dict) and entry.get("fyers_symbol") == candidate:
+                return candidate, float(entry.get("tick_size") or tick)
+    except Exception as lookup_err:
+        print(f"[Square-off Symbol Lookup Notice] {lookup_err}")
+
+    return candidate, tick
+
+
+def square_off_active_position(
+    access_token: Optional[str] = None,
+    dry_run: bool = False,
+    exit_reason: str = "EOD_SQUAREOFF",
+    exit_timeout_seconds: Optional[float] = None,
+    send_telegram_alert: bool = True,
+) -> Dict[str, Any]:
+    """
+    CLOSES any open position by placing a marketable SELL limit order on the held
+    symbol and settling the P&L via StateManager.record_exit_trade().
+    Prices the exit off the current Fyers LTP (rounded down to tick) so the SELL
+    is immediately marketable. Returns a status dict.
+    """
+    sm = StateManager()
+    active_pos = sm.state.get("active_position")
+    if not active_pos:
+        print("  [Square-off] No active position in local state. Checking broker positions for uncovered exposure...")
+        return _close_uncovered_positions(
+            access_token=access_token,
+            dry_run=dry_run,
+            exit_reason=exit_reason,
+            exit_timeout_seconds=exit_timeout_seconds,
+            send_telegram_alert=send_telegram_alert,
+        )
+
+    symbol, tick_size = resolve_squareoff_symbol(active_pos)
+    qty = int(active_pos.get("quantity") or 0)
+    trade_id = int(active_pos.get("trade_id") or 0)
+
+    print(f"\n  [Square-off] Closing active position: {symbol} x {qty}")
+    if qty <= 0 or not symbol:
+        return {"status": "error", "message": f"Invalid position for square-off (symbol={symbol}, qty={qty})"}
+
+    # Fetch current LTP to make the exit order marketable
+    ltp = 0.0
+    tok = access_token or get_active_fyers_token()
+    if tok and not tok.startswith("MOCK") and not dry_run:
+        try:
+            app_id = FYERS_APP_ID or os.getenv("FYERS_APP_ID", "").strip()
+            fyers = fyersModel.FyersModel(client_id=app_id, token=tok, is_async=False, log_path=os.path.dirname(TOKEN_FILE_PATH))
+            q = fyers.quotes(data={"symbols": symbol})
+            if isinstance(q, dict) and q.get("s") == "ok" and q.get("d"):
+                ltp = float(q["d"][0].get("v", {}).get("lp", 0) or 0)
+        except Exception as quote_err:
+            print(f"[Square-off Quote Notice] Could not fetch LTP for {symbol}: {quote_err}")
+
+    # SELL at or below the marketable price so the exit fills immediately
+    if ltp > 0:
+        exit_limit = ltp - max(tick_size, ltp * 0.005)
+    else:
+        exit_limit = float(active_pos.get("entry_premium") or 0.05)
+
+    res = place_aggressive_limit_order(
+        symbol=symbol,
+        quantity=qty,
+        transaction_type="SELL",
+        product_type="INTRADAY",
+        limit_price=exit_limit,
+        dry_run=dry_run,
+        access_token=tok,
+        tick_size=tick_size,
+        fill_timeout_seconds=exit_timeout_seconds
+    )
+
+    if res.get("status") == "TRADED":
+        filled_price = float(res.get("filled_price") or exit_limit)
+        if trade_id:
+            sm.record_exit_trade(trade_id=trade_id, exit_premium=filled_price, exit_reason=exit_reason)
+        else:
+            sm.state["active_position"] = None
+            sm.state["active_trade_id"] = None
+            sm._save_state(sm.state)
+
+        print(f"  [Square-off] Position closed @ Rs {filled_price:.2f} (order {res.get('order_id')}). P&L settled.")
+        if send_telegram_alert:
+            try:
+                from reporting.telegram_bot import send_telegram_message
+                msg = (
+                    "✅ <b>[POSITION SQUARED OFF]</b>\n"
+                    "========================================\n"
+                    f"<b>Symbol       :</b> <code>{symbol}</code>\n"
+                    f"<b>Qty          :</b> {qty}\n"
+                    f"<b>Exit Premium :</b> Rs {filled_price:.2f}\n"
+                    f"<b>Reason       :</b> {exit_reason}\n"
+                    f"<b>Order ID     :</b> <code>{res.get('order_id')}</code>\n"
+                    "========================================"
+                )
+                send_telegram_message(msg)
+            except Exception as tele_err:
+                print(f"[Square-off Telegram Notice] {tele_err}")
+        return {
+            "status": "TRADED",
+            "order_id": res.get("order_id"),
+            "symbol": symbol,
+            "quantity": qty,
+            "exit_premium": filled_price,
+            "trade_id": trade_id,
+            "remarks": res.get("remarks")
+        }
+
+    print(f"  [Square-off] Could not close position: {res.get('status')} -> {res.get('remarks')}")
+    if not dry_run and res.get("status") in ("REJECTED", "REJECTED_EXCEPTION"):
+        handle_execution_issue_and_halt(
+            issue_title="EOD SQUARE-OFF FAILED - POSITION STILL OPEN",
+            detailed_reason=f"Broker Response: {res.get('remarks')}\nSymbol: {symbol}",
+            symbol=symbol
+        )
+    return {
+        "status": res.get("status"),
+        "order_id": res.get("order_id"),
+        "symbol": symbol,
+        "quantity": qty,
+        "trade_id": trade_id,
+        "remarks": res.get("remarks")
+    }

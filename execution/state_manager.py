@@ -268,6 +268,8 @@ class StateManager:
             "execution_mode": execution_mode,
             "exchange": ex_segment,
             "option_symbol": option_contract["option_symbol"],
+            "fyers_symbol": option_contract.get("fyers_symbol") or option_contract.get("instrument_key") or "",
+            "tick_size": float(option_contract.get("tick_size") or 0.05),
             "quantity": option_contract["lot_size"],
             "entry_premium": entry_premium,
             "target_price": target_p,
