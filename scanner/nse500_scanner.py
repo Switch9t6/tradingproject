@@ -126,7 +126,8 @@ def evaluate_optimized_breakout(item: dict, candles: list, nifty_change_pct: flo
         )
         
         if not factor_rating.get("is_qualified", True):
-            print(f"[Factor Matrix Block] Rejecting {item['symbol']}: Composite Score ({factor_rating['composite_score']}/100) < 75 Threshold.")
+            from learning.adaptive_config import adaptive_score_threshold
+            print(f"[Factor Matrix Block] Rejecting {item['symbol']}: Composite Score ({factor_rating['composite_score']}/100) < {adaptive_score_threshold():.0f} Adaptive Threshold.")
             return None
 
         score = factor_rating["composite_score"]
@@ -198,10 +199,11 @@ def scan_nse500_and_indices(access_token: str, dry_run: bool = False, top_3_sect
 
     # Live Mode Scanning
     candidates = []
+    today_str = datetime.date.today().isoformat()
     for item in SCANNER_UNIVERSE:
         key = item["instrument_key"]
         try:
-            url = f"{UPSTOX_API_BASE_URL}/historical-candle/{key}/5minute/2026-08-07/2026-08-07"
+            url = f"{UPSTOX_API_BASE_URL}/historical-candle/{key}/5minute/{today_str}/{today_str}"
             headers = {"Accept": "application/json", "Authorization": f"Bearer {access_token}"}
             resp = requests.get(url, headers=headers, timeout=5)
             if resp.status_code == 200:

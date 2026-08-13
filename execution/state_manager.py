@@ -221,12 +221,15 @@ class StateManager:
         self._check_date_reset()
         return float(self.state.get("current_wallet_balance", INITIAL_WALLET_CAPITAL))
 
-    def record_entry_trade(self, option_contract: Dict[str, Any], entry_premium: float, target_p: float, stop_p: float, execution_mode: str = "DRY_RUN", exchange: str = "NSE_FO") -> int:
+    def record_entry_trade(self, option_contract: Dict[str, Any], entry_premium: float, target_p: float, stop_p: float, execution_mode: str = "DRY_RUN", exchange: str = "NSE_FO", filled_quantity: Optional[int] = None) -> int:
         self._check_date_reset()
         today_str = datetime.date.today().isoformat()
         now_str = datetime.datetime.now().strftime("%H:%M:%S")
         
         ex_segment = "MCX_FO" if ("MCX" in str(exchange).upper() or "CRUDE" in str(exchange).upper() or option_contract.get("is_mcx") or "CRUDE" in str(option_contract.get("underlying_symbol")).upper()) else "NSE_FO"
+        # Partial fills (0 < filled < lot) are recorded with the ACTUAL filled
+        # quantity so P&L, cap counters and the position monitor size correctly.
+        qty = filled_quantity if (filled_quantity is not None and filled_quantity > 0) else option_contract["lot_size"]
 
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -244,7 +247,7 @@ class StateManager:
             option_contract["option_symbol"],
             option_contract["option_type"],
             option_contract["strike_price"],
-            option_contract["lot_size"],
+            qty,
             entry_premium,
             target_p,
             stop_p,
@@ -272,7 +275,7 @@ class StateManager:
             "option_symbol": option_contract["option_symbol"],
             "fyers_symbol": option_contract.get("fyers_symbol") or option_contract.get("instrument_key") or "",
             "tick_size": float(option_contract.get("tick_size") or 0.05),
-            "quantity": option_contract["lot_size"],
+            "quantity": qty,
             "entry_premium": entry_premium,
             "target_price": target_p,
             "stop_price": stop_p
@@ -280,7 +283,7 @@ class StateManager:
         self._save_state(self.state)
         return trade_id
 
-    def record_exit_trade(self, trade_id: int, exit_premium: float, friction_fees: float = 0.0, exit_reason: str = "EXIT"):
+    def record_exit_trade(self, trade_id: int, exit_premium: float, friction_fees: float = 0.0, exit_reason: str = "EXIT", settled_quantity: Optional[int] = None):
         self._check_date_reset()
         now_str = datetime.datetime.now().strftime("%H:%M:%S")
         
@@ -292,8 +295,11 @@ class StateManager:
         ex_segment = "NSE_FO"
         if row:
             quantity, entry_premium, mode, ex_segment = row
+            # Partial exits settle P&L on the ACTUAL quantity closed (filled_qty),
+            # not the originally recorded lot.
+            exit_qty = settled_quantity if (settled_quantity is not None and settled_quantity > 0) else quantity
             from reporting.friction_calculator import calculate_trade_friction
-            f_res = calculate_trade_friction(quantity, entry_premium, exit_premium)
+            f_res = calculate_trade_friction(exit_qty, entry_premium, exit_premium)
             gross_pnl = f_res["gross_pnl"]
             calc_friction = f_res["total_friction"] if friction_fees <= 0 else friction_fees
             net_pnl = round(gross_pnl - calc_friction, 2)
@@ -315,12 +321,15 @@ class StateManager:
             # Trigger AI Self-Learning Engine Post-Mortem Analysis
             try:
                 from learning.self_learning_engine import analyze_closed_trade
+                from learning.adaptive_config import invalidate_adaptive_cache
                 analyze_closed_trade({
                     "id": trade_id,
                     "net_pnl": net_pnl,
                     "exit_reason": exit_reason,
                     "exchange": ex_segment
                 })
+                # Scanners must see the fresh learned thresholds on the next run.
+                invalidate_adaptive_cache()
             except Exception as ai_err:
                 print(f"[AI Learning Engine Notice] {ai_err}")
             

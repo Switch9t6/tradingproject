@@ -26,6 +26,10 @@ logs/fyersRequests.log
 logs/scheduler_state.json
 logs/halt_alert_sent.flag
 
+# Packaging / one-off analysis artifacts (never commit)
+tradingbot.zip
+reports/regime_test_report.csv
+
 # Byte-compiled / Python caches
 __pycache__/
 *.py[cod]

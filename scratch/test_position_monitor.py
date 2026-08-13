@@ -130,7 +130,7 @@ recorded = []
 class StubSM:
     def __init__(self, *a, **k):
         self.state = {"active_position": {"trade_id": 777}}
-    def record_exit_trade(self, trade_id, exit_premium, exit_reason="EXIT", friction_fees=0.0):
+    def record_exit_trade(self, trade_id, exit_premium, exit_reason="EXIT", friction_fees=0.0, **kwargs):
         recorded.append((trade_id, exit_premium, exit_reason))
 sm.StateManager = StubSM
 ft.place_aggressive_limit_order = lambda **k: {"status": "TRADED", "filled_price": 108.0, "order_id": "ORD_TSL"}

@@ -1,5 +1,6 @@
 import time
 import asyncio
+import datetime
 import requests
 import pandas as pd
 import numpy as np
@@ -11,7 +12,8 @@ def fetch_single_stock_candles(symbol: str, instrument_key: str, access_token: s
     """
     Fetch intraday 5-minute candles for a single stock and compute volume spike ratio & price momentum.
     """
-    url = f"{UPSTOX_API_BASE_URL}/historical-candle/{instrument_key}/5minute/2026-08-07/2026-08-07"
+    today_str = datetime.date.today().isoformat()
+    url = f"{UPSTOX_API_BASE_URL}/historical-candle/{instrument_key}/5minute/{today_str}/{today_str}"
     headers = {"Accept": "application/json"}
     if access_token and not access_token.startswith("MOCK") and not access_token.startswith("your_"):
         headers["Authorization"] = f"Bearer {access_token}"

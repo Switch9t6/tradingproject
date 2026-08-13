@@ -21,8 +21,9 @@ from config.settings import (
     FYERS_TOTP_SECRET,
     FYERS_ACCESS_TOKEN,
     TOKEN_FILE_PATH,
-    INITIAL_WALLET_CAPITAL,
     MAX_BID_ASK_SPREAD_PCT,
+    MAX_ALLOCATION_PCT,
+    SLIPPAGE_BUFFER_PCT,
     LIMIT_ORDER_TIMEOUT_SECONDS
 )
 
@@ -420,7 +421,20 @@ def verify_and_fetch_live_fyers_balance(access_token: Optional[str] = None) -> t
                         pass
                     return True, avail, "VERIFIED"
                 else:
-                    return True, INITIAL_WALLET_CAPITAL, "VERIFIED_DEFAULT"
+                    # ZERO BALANCE IS A HARD BLOCK: never trade on a fabricated
+                    # 10000 fallback. If the broker reports Rs 0 available cash,
+                    # funding is missing or the account is misconfigured - halt
+                    # the engine and alert immediately.
+                    print("[Fyers Verification] CRITICAL: Fyers reported ZERO available balance.")
+                    try:
+                        handle_execution_issue_and_halt(
+                            "ZERO_BALANCE",
+                            "Fyers reported zero available balance - refusing to trade. "
+                            "Top up funding before restarting the engine."
+                        )
+                    except Exception:
+                        pass
+                    return False, 0.0, "ZERO_BALANCE_HALT: Broker reported zero available cash."
             elif isinstance(res, dict) and res.get("code") in [401, -17]:
                 if attempt == 0:
                     print("[Fyers Verification] Token expired (401). Retrying with fresh TOTP login...")
@@ -429,7 +443,7 @@ def verify_and_fetch_live_fyers_balance(access_token: Optional[str] = None) -> t
         except Exception as ex:
             return False, 0.0, f"Fyers Connection Exception: {ex}"
 
-    return False, INITIAL_WALLET_CAPITAL, "Fyers API verification complete."
+    return False, 0.0, "Fyers API verification FAILED - halting (no balance assumed)."
 
 
 def get_live_wallet_balance(access_token: Optional[str] = None, auto_renew: bool = False) -> float:
@@ -449,31 +463,77 @@ def get_live_wallet_balance(access_token: Optional[str] = None, auto_renew: bool
 
             if isinstance(res, dict) and res.get("s") == "ok":
                 fund_limits = res.get("fund_limit", [])
+                avail = 0.0
                 for f in fund_limits:
                     if f.get("title") in ["Total Balance", "Available Balance", "Net Available"]:
                         avail = float(f.get("equityAmount", 0.0) or f.get("amount", 0.0))
-                        if avail > 0:
-                            try:
-                                sm = StateManager()
-                                sm.state["current_wallet_balance"] = avail
-                                sm._save_state(sm.state)
-                            except Exception:
-                                pass
-                            return avail
+                        break
+                if avail <= 0 and fund_limits:
+                    avail = float(fund_limits[0].get("equityAmount", 0.0) or fund_limits[0].get("amount", 0.0))
+                if avail > 0:
+                    try:
+                        sm = StateManager()
+                        sm.state["current_wallet_balance"] = avail
+                        sm._save_state(sm.state)
+                    except Exception:
+                        pass
+                    return avail
+                else:
+                    # Broker reachable but Rs 0 available: hard-halt rather than
+                    # fall back to any stored/default capital.
+                    print("[Fyers Wallet Notice] CRITICAL: Fyers reported zero available balance.")
+                    try:
+                        handle_execution_issue_and_halt(
+                            "ZERO_BALANCE",
+                            "Fyers reported zero available balance - refusing to trade. "
+                            "Top up funding before restarting the engine."
+                        )
+                    except Exception:
+                        pass
+                    return 0.0
         except Exception as e:
             print(f"[Fyers Wallet Notice] {e}")
 
     try:
         return StateManager().get_current_wallet_balance()
     except Exception:
-        return INITIAL_WALLET_CAPITAL
+        return 0.0
+
+
+def compute_usable_trade_budget(live_wallet_cash: Optional[float], budget_cap: Optional[float]) -> Optional[float]:
+    """
+    HIERARCHICAL PER-TRADE USABLE BUDGET (single source of truth for the formula):
+
+        usable_budget = min(live_wallet_cash, budget_cap)
+                        * MAX_ALLOCATION_PCT * (1.0 - SLIPPAGE_BUFFER_PCT)
+
+    * live_wallet_cash : ACTUAL unencumbered broker cash (verified at pre-flight;
+                         NEVER a fabricated default). When it is missing / <= 0 we
+                         return None so the caller MUST NOT trade.
+    * budget_cap       : the hierarchical cap passed down by the pipeline
+                         (per-session micro-capital cap, or the live wallet itself).
+    * MAX_ALLOCATION_PCT      : never risk more than 80% of the cash pool on one trade.
+    * SLIPPAGE_BUFFER_PCT     : reserve 2% for fees + bid-ask spread.
+
+    The result is a HARD ceiling: any contract whose total_lot_cost (ask x lot)
+    exceeds this value is rejected before the order is even evaluated/submitted.
+    """
+    if not live_wallet_cash or live_wallet_cash <= 0:
+        return None
+    cap = float(budget_cap) if budget_cap is not None else float("inf")
+    return min(float(live_wallet_cash), cap) * MAX_ALLOCATION_PCT * (1.0 - SLIPPAGE_BUFFER_PCT)
 
 
 def _poll_order_fill(fyers, order_id: str, qty: int, timeout_seconds: float) -> Dict[str, Any]:
     """
     Polls the Fyers orderbook until the order fills, is rejected, or times out.
-    Returns {"status": "TRADED"|"REJECTED"|"PENDING", ...}.
+    Returns {"status": "TRADED"|"REJECTED"|"PENDING"|"PARTIALLY_FILLED", ...}.
     Fyers orderbook 'status' codes: 1=Cancelled, 2=Complete, 3=Rejected, 4=Pending.
+
+    PARTIAL-FILL CONTRACT: as soon as 0 < filled_qty < qty is observed, the order
+    is returned as PARTIALLY_FILLED (with filled_qty + filled_price) so the caller
+    can immediately cancel the resting remainder and size the position off the
+    ACTUAL filled quantity - never assume the full qty executed.
     """
     deadline = time.time() + max(5.0, timeout_seconds)
     last_status = "4"
@@ -490,6 +550,15 @@ def _poll_order_fill(fyers, order_id: str, qty: int, timeout_seconds: float) -> 
                     avg_price = float(o.get("avgPrice", 0) or 0)
                     if filled_qty >= qty:
                         return {"status": "TRADED", "filled_price": avg_price if avg_price > 0 else None, "order_status": status}
+                    if filled_qty > 0:
+                        # Partial fill -> return immediately so the caller cancels
+                        # the remainder (see place_aggressive_limit_order).
+                        return {
+                            "status": "PARTIALLY_FILLED",
+                            "filled_qty": filled_qty,
+                            "filled_price": avg_price if avg_price > 0 else None,
+                            "order_status": status,
+                        }
                     if status in ("1", "3", "Cancelled", "Rejected", "CANCELLED", "REJECTED"):
                         return {"status": "REJECTED", "message": f"order_status={status}", "order_status": status}
         except Exception as poll_err:
@@ -598,6 +667,27 @@ def place_aggressive_limit_order(
                     "symbol": symbol,
                     "remarks": f"Order filled (broker status: {fill.get('order_status')})"
                 }
+            if fill["status"] == "PARTIALLY_FILLED":
+                # PARTIAL-FILL HANDLER: the moment any qty fills below the full lot,
+                # cancel the resting remainder so no orphan exposure is left working
+                # on a price we no longer want. The filled portion is returned for
+                # position sizing (see execute_option_trade).
+                try:
+                    c_res = fyers.cancel_order(data={"id": order_id})
+                    print(f"[FYERS PARTIAL-FILL HANDLER] {fill['filled_qty']}/{quantity} filled @ "
+                          f"{fill.get('filled_price') or limit_price}; cancelling remainder "
+                          f"({quantity - fill['filled_qty']}). Cancel response: {c_res}")
+                except Exception as c_err:
+                    print(f"[FYERS PARTIAL-FILL CANCEL WARNING] {c_err}")
+                return {
+                    "status": "PARTIALLY_FILLED",
+                    "order_id": order_id,
+                    "filled_qty": fill["filled_qty"],
+                    "filled_price": fill.get("filled_price") or limit_price,
+                    "quantity": quantity,
+                    "symbol": symbol,
+                    "remarks": f"Partial fill {fill['filled_qty']}/{quantity}; remainder cancelled."
+                }
             if fill["status"] == "REJECTED":
                 return {
                     "status": "REJECTED",
@@ -644,11 +734,61 @@ class FyersTrader:
     ) -> Optional[Dict[str, Any]]:
         """
         Executes a single-lot option trade on Fyers API v3.
+
+        PRE-ORDER AFFORDABILITY GATE (belt-and-suspenders enforcement):
+        Re-derives the usable budget from the LIVE broker balance at order time and
+        refuses to submit any order whose total lot cost exceeds it. Even if the
+        option mapper sized the candidate, the wallet may have moved in the
+        meantime - never place an order that could exceed the actual cash pool.
         """
         symbol = option_contract.get("fyers_symbol") or option_contract.get("instrument_key") or option_contract["option_symbol"]
         lot_size = int(option_contract["lot_size"])
         ask_price = float(option_contract["ask_price"])
         exchange = "MCX_FO" if "MCX" in symbol else "NSE_FO"
+
+        # ---- FINAL PRE-ORDER AFFORDABILITY GATE ----
+        lot_cost = round(ask_price * lot_size, 2)
+        if not self.dry_run:
+            # Fresh live cash at order time (verification-style fetch; 0/error -> halt inside).
+            live_cash = get_live_wallet_balance(self.access_token)
+            usable = compute_usable_trade_budget(live_cash, max_budget)
+            usable_disp = f"Rs {usable:,.2f}" if usable is not None else "UNAVAILABLE"
+            if usable is None or lot_cost > usable:
+                print(f"[Fyers Pre-Order Gate] ABORT: {symbol} x {lot_size} lot cost Rs {lot_cost:,.2f} "
+                      f"> usable budget {usable_disp} "
+                      f"(min(live cash, cap) x {MAX_ALLOCATION_PCT} x (1-{SLIPPAGE_BUFFER_PCT})).")
+                if not self.dry_run:
+                    handle_execution_issue_and_halt(
+                        "INSUFFICIENT_WALLET_BALANCE",
+                        f"Pre-order gate: lot cost Rs {lot_cost:,.2f} exceeds usable budget "
+                        f"{usable_disp}. Refusing to place order.",
+                        symbol=symbol,
+                    )
+                return {
+                    "trade_id": None,
+                    "order_id": None,
+                    "instrument_key": symbol,
+                    "option_symbol": option_contract["option_symbol"],
+                    "status": "INSUFFICIENT_WALLET_BALANCE",
+                    "exchange": exchange,
+                    "remarks": f"Lot cost Rs {lot_cost:,.2f} exceeds usable budget "
+                               f"(live cash available: {live_cash:,.2f})",
+                }
+        else:
+            # Dry-run: honor the caller cap only (no live balance to enforce).
+            usable = float(max_budget) if max_budget else 0.0
+            if usable > 0 and lot_cost > usable:
+                print(f"[Fyers Pre-Order Gate] DRY-RUN ABORT: {symbol} x {lot_size} lot cost "
+                      f"Rs {lot_cost:,.2f} > budget cap Rs {usable:,.2f}.")
+                return {
+                    "trade_id": None,
+                    "order_id": None,
+                    "instrument_key": symbol,
+                    "option_symbol": option_contract["option_symbol"],
+                    "status": "INSUFFICIENT_WALLET_BALANCE",
+                    "exchange": exchange,
+                    "remarks": f"Lot cost Rs {lot_cost:,.2f} exceeds budget cap Rs {usable:,.2f}",
+                }
 
         order_res = place_aggressive_limit_order(
             symbol=symbol,
@@ -694,6 +834,68 @@ class FyersTrader:
                 start_position_monitor(
                     symbol=symbol,
                     quantity=lot_size,
+                    trade_id=trade_id,
+                    entry_price=filled_price,
+                    target_price=target_p,
+                    initial_sl=stop_p,
+                    tick_size=float(option_contract.get("tick_size") or 0.05),
+                    access_token=self.access_token,
+                    dry_run=self.dry_run,
+                    exchange=exchange,
+                )
+            except Exception as mon_err:
+                print(f"[Position Monitor Start Notice] {mon_err}")
+
+            return result
+        elif order_res.get("status") == "PARTIALLY_FILLED":
+            # PARTIAL-FILL HANDOFF: the order partially filled and the remainder
+            # was already cancelled inside place_aggressive_limit_order. Record the
+            # entry for the ACTUAL filled quantity only (so budget/caps/P&L size
+            # correctly) and hand the filled portion to position monitoring.
+            filled_qty = int(order_res.get("filled_qty", 0) or 0)
+            filled_price = float(order_res.get("filled_price") or ask_price)
+            if filled_qty <= 0:
+                print("[Fyers Execution Aborted] Partial fill reported with filled_qty=0; ignoring.")
+                return {
+                    "trade_id": None,
+                    "order_id": order_res.get("order_id"),
+                    "instrument_key": symbol,
+                    "option_symbol": option_contract["option_symbol"],
+                    "status": "PARTIALLY_FILLED",
+                    "exchange": exchange,
+                    "remarks": "Partial fill reported with zero filled qty",
+                }
+
+            target_p = round(filled_price * 1.25, 2)
+            stop_p = round(filled_price * 0.88, 2)
+            trade_id = self.state_mgr.record_entry_trade(
+                option_contract=option_contract,
+                entry_premium=filled_price,
+                target_p=target_p,
+                stop_p=stop_p,
+                execution_mode="DRY_RUN" if self.dry_run else "LIVE",
+                exchange=exchange,
+                filled_quantity=filled_qty
+            )
+            result = {
+                "trade_id": trade_id,
+                "order_id": order_res.get("order_id"),
+                "instrument_key": symbol,
+                "option_symbol": option_contract["option_symbol"],
+                "entry_premium": filled_price,
+                "quantity": filled_qty,
+                "target_price": target_p,
+                "stop_price": stop_p,
+                "status": "OPEN",
+                "exchange": exchange,
+                "remarks": f"PARTIAL FILL: {filled_qty}/{lot_size} qty filled; remainder cancelled.",
+            }
+
+            try:
+                from execution.position_monitor import start_position_monitor
+                start_position_monitor(
+                    symbol=symbol,
+                    quantity=filled_qty,
                     trade_id=trade_id,
                     entry_price=filled_price,
                     target_price=target_p,
@@ -1215,6 +1417,40 @@ def square_off_active_position(
             "order_id": res.get("order_id"),
             "symbol": symbol,
             "quantity": qty,
+            "exit_premium": filled_price,
+            "trade_id": trade_id,
+            "remarks": res.get("remarks")
+        }
+
+    if res.get("status") == "PARTIALLY_FILLED":
+        filled_qty = int(res.get("filled_qty", 0) or 0)
+        filled_price = float(res.get("filled_price") or exit_limit)
+        if trade_id and filled_qty > 0:
+            sm.record_exit_trade(trade_id=trade_id, exit_premium=filled_price,
+                                 exit_reason=exit_reason, settled_quantity=filled_qty)
+        else:
+            sm.state["active_position"] = None
+            sm.state["active_trade_id"] = None
+            sm._save_state(sm.state)
+        print(f"  [Square-off] PARTIAL close: {filled_qty}/{qty} @ Rs {filled_price:.2f}. "
+              f"Remainder will be swept by EOD reconciliation.")
+        if send_telegram_alert:
+            try:
+                from reporting.telegram_bot import send_telegram_message
+                send_telegram_message(
+                    f"⚠️ <b>[PARTIAL SQUARE-OFF]</b>\n"
+                    f"Symbol      : {symbol}\n"
+                    f"Closed      : {filled_qty}/{qty} @ Rs {filled_price:.2f}\n"
+                    f"Remainder   : queued for EOD reconciliation.\n"
+                    f"Order ID    : {res.get('order_id')}"
+                )
+            except Exception as tele_err:
+                print(f"[Square-off Telegram Notice] {tele_err}")
+        return {
+            "status": "PARTIALLY_FILLED",
+            "order_id": res.get("order_id"),
+            "symbol": symbol,
+            "quantity": filled_qty,
             "exit_premium": filled_price,
             "trade_id": trade_id,
             "remarks": res.get("remarks")

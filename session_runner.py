@@ -29,7 +29,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config.settings import (
     LOGS_DIR,
     MAX_DAILY_TRADES,
-    MICRO_CAPITAL_BUDGET_CAP,
+    MICRO_CAPITAL_BUDGET_CAP_NSE,
+    MICRO_CAPITAL_BUDGET_CAP_MCX,
     QUALIFICATION_SCORE_THRESHOLD,
     TAKE_PROFIT_PCT,
     STOP_LOSS_PCT,
@@ -328,9 +329,16 @@ def _run_session_attempt(
         return {"status": "blocked", "message": gate_error}
 
     _authorize_blockers(sm, exchange, override=override)
-    budget_cap = MICRO_CAPITAL_BUDGET_CAP if micro_capital else sm.get_current_wallet_balance()
+    micro_cap = MICRO_CAPITAL_BUDGET_CAP_MCX if session == "mcx" else MICRO_CAPITAL_BUDGET_CAP_NSE
+    # HIERARCHICAL BUDGET CLAMP: per-trade cap never exceeds the ACTUAL live wallet
+    # cash (verified at pre-flight). The option mapper applies the final
+    # usable-budget formula at sizing:
+    #   usable_budget = min(live_wallet_cash, budget_cap) * MAX_ALLOCATION_PCT
+    #                   * (1.0 - SLIPPAGE_BUFFER_PCT)
+    live_cash = sm.get_current_wallet_balance()
+    budget_cap = min(live_cash, micro_cap) if micro_capital else live_cash
     if budget_cap <= 0:
-        budget_cap = MICRO_CAPITAL_BUDGET_CAP
+        budget_cap = micro_cap
     print(f"  [Budget] Single best opportunity capped at Rs {budget_cap:,.2f} INR")
 
     # ---- Gate 2: news blackout windows ----
@@ -373,16 +381,28 @@ def _run_session_attempt(
         except Exception as sec_err:
             print(f"  [Sector Engine Warning] {sec_err}")
 
-    # ---- Gate 5: single best-opportunity scan (100-Pt Matrix) ----
+    # ---- Gate 5: real-market scan (live candles; no synthetic signals) ----
     print(f"\n[Session Runner] Scanning {session_label} (Composite Score >= {QUALIFICATION_SCORE_THRESHOLD:.0f} Pts threshold)...")
-    from scanner.smart_scanner import scan_smart_opportunities
-    candidate = scan_smart_opportunities(
-        access_token=access_token,
-        session_override=SESSION_SCAN_OVERRIDE[session],
-        top_3_sectors=top_3_sectors or None,
-        micro_capital=micro_capital,
-        dry_run=dry_run,
-    )
+    candidate = None
+    if session == "mcx":
+        from scanner.crude_scanner import scan_mcx_crude_oil
+        candidate = scan_mcx_crude_oil(access_token=access_token)
+    else:
+        from scanner.nse500_scanner import scan_nse500_and_indices
+        from scanner.fast_scanner import scan_500_stocks_multithreaded
+        from config.settings import SCANNER_UNIVERSE
+        try:
+            candidate = scan_nse500_and_indices(access_token=access_token,
+                                                top_3_sectors=top_3_sectors or None,
+                                                dry_run=dry_run)
+        except Exception as nse_err:
+            print(f"[Session Runner] nse500_scanner failed: {nse_err}")
+        if not candidate:
+            try:
+                fast_list = scan_500_stocks_multithreaded(SCANNER_UNIVERSE, access_token=access_token, dry_run=dry_run)
+                candidate = fast_list[0] if fast_list else None
+            except Exception as fast_err:
+                print(f"[Session Runner] fast_scanner failed: {fast_err}")
     if not candidate:
         print("[Session Runner] No high-conviction candidate qualified (Composite Score < threshold). No trade.")
         _send_once(
@@ -428,6 +448,15 @@ def _run_session_attempt(
                 f"💸 <b>[{session_label}]</b> Best candidate found (score {score_disp}) but the usable "
                 f"wallet budget (max Rs {budget_cap:,.2f}) is insufficient for any {candidate.get('option_type')} "
                 f"strike within the OTM range. No trade placed.",
+            )
+        elif map_err == "PREMIUM_BELOW_SANITY_FLOOR":
+            print(f"[Session Runner] Candidate {candidate.get('option_type')} premium fell below the "
+                  f"sanity floor (0.5% of spot) - likely a bad/stale quote. No trade - protection activated.")
+            _send_once(
+                f"CONTRACT_SANITY_{session}_{flag_date}",
+                f"🛡️ <b>[{session_label} - PREMIUM BELOW SANITY FLOOR]</b>\n"
+                f"Best candidate found (score {score_disp}) but its {candidate.get('option_type')} premium is "
+                f"below the 0.5%-of-spot sanity floor - likely a bad/stale quote. Trade skipped for safety.",
             )
         elif map_err == "NO_CONTRACT":
             print(f"[Session Runner] No matching contract in Fyers master for the ATM strike. No trade.")

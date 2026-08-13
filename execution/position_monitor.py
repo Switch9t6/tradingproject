@@ -271,10 +271,13 @@ def _execute_exit(symbol: str, quantity: int, trade_id: str, tick_size: float,
             print(f"  [Position Monitor Manual Exit Notice] {man_exit_err}")
 
     res = None
-    for attempt in range(1, 3):
+    closed_qty = 0
+    last_fill = float(exit_price)
+    remaining_qty = qty
+    for attempt in range(1, 4):
         res = place_aggressive_limit_order(
             symbol=symbol,
-            quantity=qty,
+            quantity=remaining_qty,
             transaction_type="SELL",
             product_type="INTRADAY",
             limit_price=exit_price,
@@ -283,22 +286,51 @@ def _execute_exit(symbol: str, quantity: int, trade_id: str, tick_size: float,
             tick_size=tick_size,
             fill_timeout_seconds=10,
         )
-        if res.get("status") == "TRADED":
-            filled = float(res.get("filled_price") or exit_price)
-            net_pnl = sm.record_exit_trade(trade_id=trade_id, exit_premium=filled, exit_reason=reason)
-            print(f"  [Position Monitor] EXITED #{trade_id}: {reason} @ Rs {filled:.2f} "
-                  f"(order {res.get('order_id')}) | Net P&L: {net_pnl if net_pnl is not None else 'N/A'}")
-            _send_exit_alert(symbol, qty, entry_price, filled, net_pnl, reason, res.get("order_id"))
-            return True
+        status = res.get("status")
+        if status == "TRADED":
+            closed_qty += remaining_qty
+            last_fill = float(res.get("filled_price") or exit_price)
+            break
 
-        if res.get("status") == "PENDING":
+        if status == "PARTIALLY_FILLED":
+            filled_qty = int(res.get("filled_qty", 0) or 0)
+            last_fill = float(res.get("filled_price") or exit_price)
+            closed_qty += filled_qty
+            remaining_qty -= filled_qty
+            print(f"  [Position Monitor] Partial exit fill {filled_qty} qty @ Rs {last_fill:.2f}; "
+                  f"retrying remainder ({remaining_qty}).")
+            if remaining_qty <= 0:
+                break
+            time.sleep(5)
+            continue
+
+        if status == "PENDING":
             print(f"  [Position Monitor] Exit order pending (attempt {attempt}). Retrying in 5s...")
             time.sleep(5)
             continue
 
         # REJECTED
-        print(f"  [Position Monitor] Exit order rejected: {res.get('status')} -> {res.get('remarks')}")
+        print(f"  [Position Monitor] Exit order rejected: {status} -> {res.get('remarks')}")
         break
+
+    if closed_qty > 0:
+        # Settle P&L on the ACTUAL closed quantity (partial exits included) so the
+        # trade ledger always reflects what really hit the broker.
+        try:
+            net_pnl = sm.record_exit_trade(trade_id=trade_id, exit_premium=last_fill, exit_reason=reason,
+                                           settled_quantity=closed_qty)
+        except Exception as settle_err:
+            print(f"  [Position Monitor Exit Settle Notice] {settle_err}")
+            net_pnl = None
+        print(f"  [Position Monitor] EXITED #{trade_id}: {reason} @ Rs {last_fill:.2f} "
+              f"(qty {closed_qty}/{qty}, order {res.get('order_id') if res else 'n/a'}) | "
+              f"Net P&L: {net_pnl if net_pnl is not None else 'N/A'}")
+        _send_exit_alert(symbol, closed_qty, entry_price, last_fill, net_pnl, reason,
+                         res.get("order_id") if res else None)
+        if closed_qty < qty:
+            print(f"  [Position Monitor WARNING] Only {closed_qty}/{qty} closed. "
+                  f"Remainder will be reconciled by EOD square-off.")
+        return True
 
     _send_exit_failed_alert(symbol, reason, res)
     return False

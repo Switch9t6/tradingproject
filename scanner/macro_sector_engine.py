@@ -7,6 +7,7 @@ import datetime
 from typing import Dict, List, Any, Optional
 
 from scanner.realtime_news_aggregator import fetch_rss_market_news, fetch_finnhub_news, vader_analyzer
+from learning.adaptive_config import adaptive_score_threshold
 
 # Quantitative Sector Asset Mapping
 SECTOR_MAP = {
@@ -112,9 +113,9 @@ def calculate_composite_opportunity_rating(
     ticker_news_score = round(((normalized_headline + 1.0) / 2.0) * 25.0, 2)
     news_total_score = round(sector_news_score + ticker_news_score, 2)
 
-    # 3. Total Composite Score (Max 100 Pts)
+    # 3. Total Composite Score (Max 100 Pts) - qualified vs anti-overfit adaptive threshold
     composite_score = round(tech_total_score + news_total_score, 2)
-    is_qualified = composite_score >= 75.0
+    is_qualified = composite_score >= adaptive_score_threshold()
 
     return {
         "symbol": symbol,

@@ -12,25 +12,27 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from auth.oauth_server import run_oauth_flow
 from scanner.nse500_scanner import scan_nse500_and_indices
+from scanner.fast_scanner import scan_500_stocks_multithreaded
 from scanner.option_mapper import resolve_atm_option_contract, get_mcx_crude_option_contract
 from scanner.news_filter import can_trade_during_news_window
 from scanner.macro_sector_engine import MacroSectorNewsEngine
 from scanner.crude_scanner import scan_mcx_crude_oil
 from scanner.crude_news_engine import is_crude_news_blackout_window
-from scanner.smart_scanner import scan_smart_opportunities
 from execution.fyers_trader import FyersTrader, get_live_wallet_balance, auto_generate_fyers_token, verify_and_fetch_live_fyers_balance, handle_execution_issue_and_halt
 from execution.telegram_control import start_telegram_listener_background, is_bot_disabled
 from web.server import start_web_server_background
 from reporting.eod_reporter import generate_eod_report
 from config.settings import (
     INITIAL_WALLET_CAPITAL,
-    MICRO_CAPITAL_BUDGET_CAP,
+    MICRO_CAPITAL_BUDGET_CAP_NSE,
+    MICRO_CAPITAL_BUDGET_CAP_MCX,
     MAX_DAILY_TRADES,
     NSE_SESSION_START,
     NSE_SESSION_END,
     MCX_SESSION_START,
     MCX_SESSION_END,
     MCX_SQUARE_OFF_SCHEDULE_TIME,
+    SCANNER_UNIVERSE,
     BASE_DIR
 )
 
@@ -194,6 +196,38 @@ def check_market_hours_and_calendar(session: str = "nse") -> bool:
             return False
         return True
 
+def _scan_nse_live_candidate(access_token: str, top_3_sectors: list, micro_capital: bool, dry_run: bool):
+    """
+    LIVE NSE candidate generation (NO synthetic signals):
+    1. Primary: nse500_scanner.scan_nse500_and_indices() - real 5-min candles with
+       VWAP+9EMA, RS/RW, India VIX & prime-momentum-window gating.
+    2. Fallback: fast_scanner.scan_500_stocks_multithreaded() - parallel real-candle
+       scan across the configured universe (top volume-spike/momentum match).
+    Both paths return a candidate with spot_price/direction/option_type that the
+    option mapper validates against the live Fyers chain + wallet budget before
+    anything can be executed.
+    """
+    try:
+        live = scan_nse500_and_indices(access_token=access_token, top_3_sectors=top_3_sectors, dry_run=dry_run)
+        if live:
+            print(f"[LIVE NSE SCANNER] nse500_scanner produced candidate: {live.get('symbol')} "
+                  f"(score {live.get('composite_rating', {}).get('composite_score')})")
+            return live
+    except Exception as scan_err:
+        print(f"[LIVE NSE SCANNER WARNING] nse500_scanner failed: {scan_err}")
+
+    try:
+        fast_list = scan_500_stocks_multithreaded(SCANNER_UNIVERSE, access_token=access_token, dry_run=dry_run)
+        if fast_list:
+            fast = fast_list[0]
+            print(f"[LIVE NSE SCANNER] fast_scanner produced candidate: {fast.get('symbol')}")
+            return fast
+    except Exception as scan_err2:
+        print(f"[LIVE NSE SCANNER WARNING] fast_scanner failed: {scan_err2}")
+
+    print("[LIVE NSE SCANNER] No real-market candidate found (no qualifying signal in the momentum window).")
+    return None
+
 def run_mcx_crude_pipeline(
     reset_state: bool = False,
     micro_capital: bool = False,
@@ -219,7 +253,12 @@ def run_mcx_crude_pipeline(
     else:
         live_wallet = state_mgr.get_current_wallet_balance()
 
-    budget_cap = MICRO_CAPITAL_BUDGET_CAP if micro_capital else live_wallet
+    # HIERARCHICAL BUDGET CLAMP: the per-trade cap can never exceed the ACTUAL
+    # verified live wallet cash. min(live_wallet, micro_cap) -> the option mapper
+    # then applies the final usable-budget formula once at sizing:
+    #   usable_budget = min(live_wallet_cash, budget_cap) * MAX_ALLOCATION_PCT
+    #                   * (1.0 - SLIPPAGE_BUFFER_PCT)
+    budget_cap = min(live_wallet, MICRO_CAPITAL_BUDGET_CAP_MCX) if micro_capital else live_wallet
 
     print("=" * 80)
     print("             SESSION 2: MCX CRUDE OIL COMMODITY OPTIONS ENGINE             ")
@@ -252,14 +291,10 @@ def run_mcx_crude_pipeline(
             handle_execution_issue_and_halt("Authentication Failed", "Failed to acquire valid Fyers Access Token for MCX Session.", "MCX_CRUDE")
         return
 
-    # 5. Scan MCX Crude Oil Multi-Factor 100-Point Matrix via Smart Scanner
-    candidate = scan_smart_opportunities(
-        access_token=access_token,
-        session_override="mcx",
-        dry_run=dry_run
-    )
+    # 5. Scan MCX Crude Oil via the REAL live-candle trend scanner
+    candidate = scan_mcx_crude_oil(access_token=access_token)
     if not candidate:
-        print("[MCX Pipeline] No qualified trend signal for MCX Crude Oil (Score < 75 Pts). Scan complete.")
+        print("[MCX Pipeline] No qualified trend signal for MCX Crude Oil (ATR/VWAP/EMA/Supertrend not aligned). Scan complete.")
         return
 
     # 6. Map MCX Option Contract (Standard 100 lot or Mini 10 lot)
@@ -342,7 +377,10 @@ def run_daily_pipeline(
     else:
         live_wallet = state_mgr.get_current_wallet_balance()
 
-    budget_cap = MICRO_CAPITAL_BUDGET_CAP if micro_capital else live_wallet
+    # HIERARCHICAL BUDGET CLAMP: per-trade cap never exceeds the ACTUAL verified
+    # live wallet cash; the option mapper applies the final usable-budget formula
+    # (min(cash, cap) * MAX_ALLOCATION_PCT * (1 - SLIPPAGE_BUFFER_PCT)) at sizing.
+    budget_cap = min(live_wallet, MICRO_CAPITAL_BUDGET_CAP_NSE) if micro_capital else live_wallet
     
     print("=" * 80)
     print(f"             SESSION 1: NSE EQUITY & INDEX OPTIONS ENGINE ({broker.upper()})            ")
@@ -376,7 +414,9 @@ def run_daily_pipeline(
     trader = FyersTrader(dry_run=dry_run, force_reset=reset_state)
 
     live_wallet = trader.get_read_only_wallet_balance()
-    budget_cap = MICRO_CAPITAL_BUDGET_CAP if micro_capital else live_wallet
+    # HIERARCHICAL BUDGET CLAMP: per-trade cap never exceeds the ACTUAL live cash;
+    # the option mapper applies the final usable-budget formula at sizing.
+    budget_cap = min(live_wallet, MICRO_CAPITAL_BUDGET_CAP_NSE) if micro_capital else live_wallet
     print(f"  [Wallet Ingestion Verified] FYERS Live Available Cash: Rs {live_wallet:,.2f} INR")
 
     # News Blackout Check
@@ -396,18 +436,17 @@ def run_daily_pipeline(
     sector_analytics = macro_engine.calculate_sector_sentiment_index()
     top_3_sectors = sector_analytics.get("top_3_sectors", [])
 
-    # STEP 3: TECH SCAN & FACTOR MATRIX SCORING (ENGINE A: NSE EQUITY 100-PT MATRIX)
-    print("\n[09:30 AM] STEP 3: SMART DUAL-ENGINE SCANNER MATRIX SCORING")
-    candidate = scan_smart_opportunities(
+    # STEP 3: LIVE CANDLE SCAN & FACTOR MATRIX SCORING (ENGINE A: NSE EQUITY 100-PT MATRIX)
+    print("\n[09:30 AM] STEP 3: LIVE NSE CANDLE SCANNER (REAL MARKET TICKS)")
+    candidate = _scan_nse_live_candidate(
         access_token=access_token,
-        session_override="nse",
         top_3_sectors=top_3_sectors,
         micro_capital=micro_capital,
         dry_run=dry_run
     )
     
     if not candidate:
-        print("[Pipeline] No high-conviction candidate qualified (Composite Score >= 75 Pts). Pipeline complete.")
+        print("[Pipeline] No real-market NSE candidate qualified. Pipeline complete.")
         generate_eod_report(dry_run=dry_run)
         return
 

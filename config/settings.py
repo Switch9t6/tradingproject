@@ -31,7 +31,14 @@ FYERS_API_BASE_URL = "https://api-t1.fyers.in/api/v3"
 # Security & Capital Constraints
 INITIAL_WALLET_CAPITAL = 10000.0          # Base Initial Capital for Dry Run (INR 10,000.00)
 DRY_RUN_INITIAL_WALLET_CAPITAL = 10000.0  # Rs 10,000 INR Capital Base for Dry Run
-MICRO_CAPITAL_BUDGET_CAP = 1000.0          # Budget Cap <= INR 1,000.00 for micro sizing
+
+# Per-segment micro-capital caps (micro sizing mode). NSE single-lot budget is
+# tighter (Rs 1,000) than MCX Crude (Rs 3,500) because MCX standard lot = 100 bbl
+# and its premium base is larger.
+MICRO_CAPITAL_BUDGET_CAP_NSE = 1000.0     # NSE micro cap <= INR 1,000.00
+MICRO_CAPITAL_BUDGET_CAP_MCX = 3500.0     # MCX micro cap <= INR 3,500.00
+# Backward-compatible alias (defaults to the NSE micro cap).
+MICRO_CAPITAL_BUDGET_CAP = MICRO_CAPITAL_BUDGET_CAP_NSE
 
 # Strict Guardrails
 MAX_DAILY_TRADES = 1                      # HARD CAP FOR LIVE PRODUCTION: MAX 1 TRADE PER DAY

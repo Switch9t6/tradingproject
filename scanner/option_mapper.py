@@ -102,6 +102,27 @@ def _apply_otm_offset(base_strike: float, strike_step: float, offset: int, optio
     return base_strike + (offset * step)
 
 
+def _first_affordable_estimate_offset(
+    base_strike: float, strike_step: float, option_type: str, preferred_offset: int,
+    ask_price: float, lot_size: int, usable_budget: float,
+) -> int:
+    """
+    Estimate-mode affordability walk (PRE-ORDER BUDGET GATE when no live option chain
+    is available): try the momentum-preferred OTM strike first, then step OTM up to
+    MAX_STRIKE_OFFSET, and return the first offset whose estimated lot cost
+    (ask x lot_size) fits the usable budget.
+
+    Falls back to the preferred offset when NOTHING fits so the downstream budget
+    gate can fail cleanly with INSUFFICIENT_WALLET_BALANCE (never forward a
+    candidate that exceeds the usable budget).
+    """
+    order = [preferred_offset] + [o for o in range(MAX_STRIKE_OFFSET + 1) if o != preferred_offset]
+    for off in order:
+        if round(float(ask_price) * int(lot_size), 2) <= usable_budget:
+            return off
+    return preferred_offset
+
+
 def _underlying_fyers_symbol(candidate: Dict[str, Any]) -> str:
     """Underlying symbol string needed by the Fyers optionchain endpoint."""
     symbol = str(candidate.get("symbol") or "").upper()
@@ -137,18 +158,29 @@ def _live_available_cash(access_token: Optional[str]) -> Optional[float]:
 
 def _dynamic_usable_budget(requested_cap: Optional[float], access_token: Optional[str]):
     """
-    Per-trade usable budget from LIVE available wallet cash:
-        usable_budget = available_cash * MAX_ALLOCATION_PCT * (1 - SLIPPAGE_BUFFER_PCT)
-    Never exceeds the requested cap (micro-capital / caller cap). Falls back to the
-    requested cap in dry-run or when live cash cannot be fetched.
+    HIERARCHICAL per-trade usable budget from LIVE available wallet cash:
+
+        usable_budget = min(live_wallet_cash, requested_cap)
+                        * MAX_ALLOCATION_PCT * (1 - SLIPPAGE_BUFFER_PCT)
+
+    The wallet clamp and the cap clamp BOTH apply BEFORE the allocation/buffer
+    percentages, so the final ceiling can never exceed the actual live cash pool.
+    Falls back to the requested cap ONLY for dry-run / test paths where no live
+    balance can exist (MOCK/no token); live mode always uses the verified cash.
+
     Returns (usable_budget, wallet_source) where wallet_source in
     {"live_wallet", "passed_cap"}.
     """
     req = float(requested_cap) if requested_cap is not None else float("inf")
     cash = _live_available_cash(access_token)
     if cash and cash > 0:
-        usable = cash * MAX_ALLOCATION_PCT * (1.0 - SLIPPAGE_BUFFER_PCT)
-        return min(req, usable), "live_wallet"
+        try:
+            from execution.fyers_trader import compute_usable_trade_budget
+            usable = compute_usable_trade_budget(cash, req)
+        except Exception:
+            usable = min(float(cash), req) * MAX_ALLOCATION_PCT * (1.0 - SLIPPAGE_BUFFER_PCT)
+        if usable is not None:
+            return usable, "live_wallet"
     return req, "passed_cap"
 
 
@@ -560,6 +592,9 @@ def _record_mapping_error(segment: str, kind: str, detail: str):
         print(f"  [Option Mapper Notice] {segment}: {detail}. TRADE SKIPPED (never trade a wrong/deep ITM strike).")
     elif kind == "INSUFFICIENT_WALLET_BALANCE":
         print(f"  [Option Mapper Notice] {segment}: {detail}. TRADE SKIPPED (insufficient usable wallet).")
+    elif kind == "PREMIUM_BELOW_SANITY_FLOOR":
+        print(f"  [Option Mapper Notice] {segment}: {detail}. TRADE SKIPPED "
+              f"(premium below 0.5% of spot - likely a bad/stale quote).")
     else:
         print(f"  [Option Mapper Notice] {segment}: no tradable contract found. {detail}. No trade.")
 
@@ -567,6 +602,31 @@ def _record_mapping_error(segment: str, kind: str, detail: str):
 def _clear_mapping_error():
     global _last_mapping_error
     _last_mapping_error = None
+
+
+# Premium sanity floor: reject any strike whose ask is below 0.5% of the spot
+# price. Sub-0.5% premiums are usually bad quotes, stale/depthless chains, or
+# contract type mix-ups (futures vs options); buying them guarantees outsized
+# friction + slippage. Skipped cleanly, never traded.
+_MIN_PREMIUM_TO_SPOT_RATIO = 0.005
+
+
+def _premium_below_sanity_floor(segment: str, spot_price: float, ask_price: float) -> bool:
+    """True when ask < 0.5% of spot -> records PREMIUM_BELOW_SANITY_FLOOR, caller skips."""
+    try:
+        spot = float(spot_price)
+        ask = float(ask_price)
+    except Exception:
+        return False
+    if spot <= 0 or ask <= 0:
+        return False
+    if ask < spot * _MIN_PREMIUM_TO_SPOT_RATIO:
+        _record_mapping_error(
+            segment, "PREMIUM_BELOW_SANITY_FLOOR",
+            f"ask Rs {ask:.2f} is below the sanity floor (0.5% of spot Rs {spot:,.2f} "
+            f"= Rs {spot * _MIN_PREMIUM_TO_SPOT_RATIO:.2f})")
+        return True
+    return False
 
 
 def _lookup_with_deviation_guard(instr_map: dict, symbol: str, target_strike: float,
@@ -665,14 +725,18 @@ def _resolve_mcx_underlying(
         offset_used = pick["otm_offset"]
     else:
         # Estimate mode: same estimated premium for every strike (no fake deltas).
-        target_strike = _apply_otm_offset(base_strike, strike_step, preferred_offset, option_type)
         estimated_delta = 0.52  # display only; never used as a gate
         estimated_premium = round(spot_price * 0.015, 2)
         ask_price = round(estimated_premium * (1.0 + (simulated_spread_pct / 2.0)), 2)
         bid_price = round(estimated_premium * (1.0 - (simulated_spread_pct / 2.0)), 2)
         oi_value = None
         gates_estimated = True
-        offset_used = preferred_offset
+        # Budget-aware OTM walk (max MAX_STRIKE_OFFSET): preferred strike first,
+        # then step OTM until the est. lot cost fits the usable budget.
+        offset_used = _first_affordable_estimate_offset(
+            base_strike, strike_step, option_type, preferred_offset,
+            ask_price, lot_size, usable_budget)
+        target_strike = _apply_otm_offset(base_strike, strike_step, offset_used, option_type)
 
     bid_ask_spread_pct = (ask_price - bid_price) / ask_price if ask_price > 0 else 0.0
 
@@ -688,6 +752,8 @@ def _resolve_mcx_underlying(
     tick_size = float(real_info.get("tick_size") or 0.05)
     ask_price = _round_to_tick(ask_price, tick_size)
     bid_price = _round_to_tick(bid_price, tick_size)
+    if _premium_below_sanity_floor("MCX", spot_price, ask_price):
+        return None
     total_lot_cost = round(ask_price * lot_size, 2)
 
     option_symbol = real_info.get("tradingsymbol", f"{underlying_symbol}_{int(target_strike)}_{option_type}")
@@ -812,7 +878,8 @@ def get_mcx_crude_option_contract(
 
     # Nothing affordable -> keep any specific master/strike error already recorded,
     # otherwise report cleanly as insufficient wallet budget.
-    if last_mapping_error() not in ("STALE_OR_MISSING_CACHE", "STRIKE_OUT_OF_BOUNDS_OR_MISSING", "NO_CONTRACT"):
+    if last_mapping_error() not in ("STALE_OR_MISSING_CACHE", "STRIKE_OUT_OF_BOUNDS_OR_MISSING",
+                                    "NO_CONTRACT", "PREMIUM_BELOW_SANITY_FLOOR"):
         _record_mapping_error("MCX", "INSUFFICIENT_WALLET_BALANCE",
                               f"no affordable {option_type} strike within {MAX_STRIKE_OFFSET} OTM steps "
                               f"<= Rs {usable_budget:,.2f}")
@@ -885,15 +952,19 @@ def resolve_atm_option_contract(
         gates_estimated = False
         offset_used = pick["otm_offset"]
     else:
-        target_strike = _apply_otm_offset(base_strike, interval, offset_steps, option_type)
-        estimated_delta = 0.52  # display only; never used as a gate
         est_premium_pct = 0.008 if candidate.get("is_index") else 0.0125
         estimated_premium = round(spot_price * est_premium_pct, 2)
         ask_price = round(estimated_premium * (1.0 + (simulated_spread_pct / 2.0)), 2)
         bid_price = round(estimated_premium * (1.0 - (simulated_spread_pct / 2.0)), 2)
+        estimated_delta = 0.52  # display only; never used as a gate
+        # Budget-aware OTM walk (max MAX_STRIKE_OFFSET): preferred strike first,
+        # then step OTM until the est. lot cost fits the usable budget.
+        offset_used = _first_affordable_estimate_offset(
+            base_strike, interval, option_type, offset_steps,
+            ask_price, lot_size, usable_budget)
+        target_strike = _apply_otm_offset(base_strike, interval, offset_used, option_type)
         oi_value = None
         gates_estimated = True
-        offset_used = offset_steps
 
     bid_ask_spread_pct = (ask_price - bid_price) / ask_price if ask_price > 0 else 0.0
 
@@ -908,6 +979,8 @@ def resolve_atm_option_contract(
     tick_size = float(real_info.get("tick_size") or 0.05)
     ask_price = _round_to_tick(ask_price, tick_size)
     bid_price = _round_to_tick(bid_price, tick_size)
+    if _premium_below_sanity_floor("NSE", spot_price, ask_price):
+        return None
     if real_info.get("lot_size"):
         lot_size = int(real_info["lot_size"])
     total_lot_cost = round(ask_price * lot_size, 2)

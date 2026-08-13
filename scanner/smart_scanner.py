@@ -19,6 +19,7 @@ from config.settings import (
 )
 from scanner.macro_sector_engine import MacroSectorNewsEngine
 from scanner.crude_news_engine import is_crude_news_blackout_window, fetch_crude_oil_news
+from learning.adaptive_config import adaptive_score_threshold, adaptive_min_volume_ratio
 
 IST_TZ = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 
@@ -133,7 +134,10 @@ def scan_nse_equities_and_indices(
 
         composite_score = round(vol_score + rs_score + tech_align_score + sent_score, 2)
 
-        if composite_score >= 75.0 and is_aligned and vol_surge_ratio >= 2.0:
+        # Anti-overfit adaptive gates: start at the production baseline (75 pts /
+        # 2.0x volume) and only tighten when a sustained adverse pattern is
+        # observed; they relax back to baseline when the pattern fades.
+        if composite_score >= adaptive_score_threshold() and is_aligned and vol_surge_ratio >= adaptive_min_volume_ratio():
             lot_size = 25 if symbol == "NIFTY" else (50 if symbol == "MIDCPNIFTY" else (25 if symbol == "FINNIFTY" else (15 if symbol == "BANKNIFTY" else (2925 if spot_price < 300 else 1250))))
             strike_step = 50.0 if symbol in ["NIFTY", "FINNIFTY"] else (25.0 if symbol == "MIDCPNIFTY" else (100.0 if symbol == "BANKNIFTY" else (2.5 if spot_price < 300 else 5.0)))
 
@@ -169,6 +173,7 @@ def scan_nse_equities_and_indices(
     qualified_candidates.sort(key=lambda x: x["composite_rating"]["composite_score"], reverse=True)
 
     # Query real-time available wallet balance for budget validation
+    available_wallet_cap = None
     try:
         from execution.upstox_trader import get_live_wallet_balance
         available_wallet_cap = get_live_wallet_balance(access_token=access_token)
@@ -176,7 +181,7 @@ def scan_nse_equities_and_indices(
         pass
 
     if micro_capital:
-        available_wallet_cap = min(available_wallet_cap, 500.0)
+        available_wallet_cap = min(available_wallet_cap or 500.0, 500.0)
 
     from scanner.option_mapper import resolve_atm_option_contract
 
@@ -203,16 +208,17 @@ def scan_nse_equities_and_indices(
 
             return best_candidate
 
-    # 2. Fallback: Return top candidate if no budget filtering constraint
+    # 2. STRICT fallback policy: NEVER return an unverified / out-of-budget
+    #    candidate. Every candidate that survives pass 1 was validated against
+    #    the real Fyers option map + budget; anything that failed (or was never
+    #    verified because the mapper could not resolve it) is a hard skip.
     if qualified_candidates:
-        best_candidate = qualified_candidates[0]
-        highest_score = best_candidate["composite_rating"]["composite_score"]
-        print(f"\n[ENGINE A SIGNAL QUALIFIED] Top Stock: {best_candidate['symbol']} | Composite Score: {highest_score}/100 Pts")
-        print(f"  Breakout Reason: {best_candidate['breakout_reason']}")
-        return best_candidate
-    else:
-        print(f"\n[ENGINE A NOTICE] No candidate scored above 75-Pt execution threshold. Skipping trade.")
+        print(f"\n[ENGINE A NOTICE] {len(qualified_candidates)} candidate(s) scored above the "
+              f"threshold but NONE passed the option-map/budget verification. Skipping trade "
+              f"(never trade an unverified/out-of-budget strike).")
         return None
+    print(f"\n[ENGINE A NOTICE] No candidate scored above 75-Pt execution threshold. Skipping trade.")
+    return None
 
 # ==============================================================================
 # ENGINE B: MCX CRUDE OIL MULTI-FACTOR COMMODITY METRICS (100-POINT MATRIX)
@@ -384,8 +390,8 @@ def scan_smart_opportunities(
         print(f"[SMART SCANNER ROUTER] Market is currently in STANDBY mode at {now_str} IST. Outside active trading windows.")
         return None
 
-    # Send Rich Telegram Alert if Qualified Candidate Discovered (Score >= 75)
-    if candidate and candidate.get("composite_rating", {}).get("composite_score", 0) >= 75.0:
+    # Send Rich Telegram Alert if Qualified Candidate Discovered (adaptive threshold)
+    if candidate and candidate.get("composite_rating", {}).get("composite_score", 0) >= adaptive_score_threshold():
         try:
             from reporting.telegram_bot import send_signal_detected_alert
             score = candidate["composite_rating"]["composite_score"]
