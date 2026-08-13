@@ -506,6 +506,7 @@ def _register_handlers(bot):
         engine_state = "PAUSED (Kill Switch Active)" if is_paused else ("ONLINE & SCANNING" if (nse_active or mcx_active) else "STANDBY")
 
         # Fetch live wallet balance directly from Fyers API v3 or check Migration Status
+        is_conf = False
         wallet_str = "Fetching Real-Time Fyers Balance..."
         try:
             from execution.fyers_trader import check_fyers_credentials_configured, get_live_wallet_balance, get_active_fyers_token
@@ -522,10 +523,22 @@ def _register_handlers(bot):
                     recorded_bal = StateManager().get_current_wallet_balance()
                     wallet_str = f"Rs {recorded_bal:,.2f} INR (Fyers API Synced)"
         except Exception:
+            is_conf = False
             wallet_str = "⚠️ MIGRATION INCOMPLETE (Pending Fyers Credentials)"
 
+        migration_header = (
+            "[FYERS MIGRATION STATUS: COMPLETE - ALL 5 CREDENTIALS CONFIGURED]"
+            if is_conf
+            else "[FYERS MIGRATION STATUS: INCOMPLETE - PENDING USER CREDENTIALS]"
+        )
+        migration_footer = (
+            "✅ Fyers API v3 migration complete. TOTP auto-login enabled."
+            if is_conf
+            else "👉 Add your 5 Fyers credentials (FYERS_APP_ID, FYERS_SECRET_KEY, FYERS_USERNAME, FYERS_PIN_CODE, FYERS_TOTP_SECRET) to .env to complete migration."
+        )
+
         status_msg = (
-            "[FYERS MIGRATION STATUS: INCOMPLETE - PENDING USER CREDENTIALS]\n"
+            f"{migration_header}\n"
             "========================================\n"
             f"Active Session      : {active_session_str}\n"
             f"Session 1 (NSE)     : {'ONLINE' if nse_active else 'CLOSED (09:00 - 15:30 IST)'}\n"
@@ -533,7 +546,7 @@ def _register_handlers(bot):
             f"💰 [Fyers Live Wallet] Balance: {wallet_str}\n"
             f"Engine State        : {engine_state}\n"
             "========================================\n"
-            "👉 Add your 5 Fyers credentials (FYERS_APP_ID, FYERS_SECRET_KEY, FYERS_USERNAME, FYERS_PIN_CODE, FYERS_TOTP_SECRET) to .env to complete migration."
+            f"{migration_footer}"
         )
         _send_or_reply(bot, status_msg, reply_markup=_build_action_keyboard(telebot)) if not isinstance(status_msg, str) else _send_or_reply(bot, message, status_msg, reply_markup=_build_action_keyboard(telebot))
 
