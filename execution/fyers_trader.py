@@ -336,17 +336,21 @@ def place_aggressive_limit_order(
     app_id = FYERS_APP_ID or os.getenv("FYERS_APP_ID", "").strip()
     fyers = fyersModel.FyersModel(client_id=app_id, token=tok, is_async=False, log_path=os.path.dirname(TOKEN_FILE_PATH))
 
+    # SEBI APRIL 2026 COMPLIANCE MANDATE:
+    # 1. Market Orders prohibited (type=1 Limit Order required).
+    # 2. offlineOrder strictly False (No AMO orders allowed).
+    # 3. Commodity segment validity strictly "DAY" (No IOC orders allowed).
     data = {
         "symbol": symbol,
         "qty": quantity,
-        "type": 1 if limit_price > 0 else 2, # 1=Limit, 2=Market
+        "type": 1, # Strictly 1=Limit Order (SEBI April 2026 Prohibition on Market Orders)
         "side": 1 if transaction_type.upper() == "BUY" else -1, # 1=Buy, -1=Sell
         "productType": product_type,
-        "limitPrice": limit_price,
+        "limitPrice": round(limit_price, 2),
         "stopPrice": 0.0,
-        "validity": "DAY",
+        "validity": "DAY", # Strictly DAY (SEBI Mandate for Commodity/Equity Options)
         "disclosedQty": 0,
-        "offlineOrder": False
+        "offlineOrder": False # Strictly False (SEBI Mandate prohibiting AMO orders)
     }
 
     try:
