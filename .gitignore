@@ -11,6 +11,9 @@ state.json
 # Generated instrument caches (downloaded & versioned by option_mapper.py)
 logs/upstox_mcx_instruments.json
 logs/upstox_nse_instruments.json
+logs/fyers_nse_instruments.json
+logs/fyers_mcx_instruments.json
+logs/fyers_*.csv.gz
 
 # Byte-compiled / Python caches
 __pycache__/

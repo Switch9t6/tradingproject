@@ -326,13 +326,16 @@ def place_aggressive_limit_order(
     product_type: str = "INTRADAY",
     limit_price: float = 0.0,
     dry_run: bool = False,
-    access_token: Optional[str] = None
+    access_token: Optional[str] = None,
+    tick_size: float = 0.05
 ) -> Dict[str, Any]:
     """
     Executes an order on Fyers API v3 gateway.
     """
-    TICK_SIZE = 0.05  # NSE & MCX option tick size (reject if limit price not a multiple)
-    limit_price = round(round(limit_price / TICK_SIZE) * TICK_SIZE, 2)
+    # Fyers rejects limit prices that are not a multiple of the instrument tick size
+    if tick_size <= 0:
+        tick_size = 0.05
+    limit_price = round(round(limit_price / tick_size) * tick_size, 2)
 
     print(f"\n===========================================================================")
     print(f"  EXECUTING AGGRESSIVE LIMIT ORDER (FYERS API V3)")
@@ -443,7 +446,8 @@ class FyersTrader:
             product_type="INTRADAY",
             limit_price=ask_price,
             dry_run=self.dry_run,
-            access_token=self.access_token
+            access_token=self.access_token,
+            tick_size=float(option_contract.get("tick_size") or 0.05)
         )
 
         if order_res.get("status") == "TRADED":
