@@ -427,7 +427,7 @@
             <p>Interactive Dual-Session Market Performance & PnL Analytics</p>
         </div>
         <div class="header-badges">
-            <span class="badge badge-dhan"><i class="fa-solid fa-link"></i> DHANHQ LIVE SYNCED</span>
+            <span class="badge badge-dhan"><i class="fa-solid fa-link"></i> FYERS API v3 SYNCED</span>
             <span class="badge badge-live"><i class="fa-solid fa-circle" style="font-size: 8px;"></i> LIVE SYSTEM</span>
         </div>
     </div>
@@ -450,6 +450,14 @@
                 <div class="date-field">
                     <label>End:</label>
                     <input type="date" id="endDate">
+                </div>
+                <div class="date-field">
+                    <label>Mode:</label>
+                    <select id="modeSelect" style="background:transparent;border:none;color:var(--text-primary);font-size:0.85rem;outline:none;cursor:pointer;">
+                        <option value="ALL" selected>All</option>
+                        <option value="LIVE">Live</option>
+                        <option value="DRY_RUN">Dry Run</option>
+                    </select>
                 </div>
                 <button class="btn-action btn-fetch" onclick="fetchReportData()">
                     <i class="fa-solid fa-rotate"></i> Update Report
@@ -491,6 +499,24 @@
             <div class="metric-val" id="valTotalTrades">0 Trades</div>
             <div class="metric-sub" id="subSessions">NSE: 0 | MCX: 0</div>
         </div>
+
+        <div class="metric-card blue">
+            <div class="metric-label">Profit Factor</div>
+            <div class="metric-val" id="valProfitFactor">0.00</div>
+            <div class="metric-sub" id="subRoi">Net ROI: 0.00%</div>
+        </div>
+
+        <div class="metric-card green">
+            <div class="metric-label">Expectancy / Trade</div>
+            <div class="metric-val" id="valExpectancy">Rs 0.00</div>
+            <div class="metric-sub" id="subAvgWinLoss">Avg Win Rs 0.00 | Avg Loss Rs 0.00</div>
+        </div>
+
+        <div class="metric-card amber">
+            <div class="metric-label">Best / Worst Trade</div>
+            <div class="metric-val" id="valBestWorst">Rs 0.00</div>
+            <div class="metric-sub" id="subBestWorst">Best: - | Worst: -</div>
+        </div>
     </div>
 
     <!-- Analytics Charts -->
@@ -510,6 +536,26 @@
             </div>
             <div class="chart-container">
                 <canvas id="winPieChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="analytics-row">
+        <div class="chart-card">
+            <div class="chart-title">
+                <span><i class="fa-solid fa-chart-column" style="color: var(--accent-amber);"></i> PnL by Exit Reason</span>
+            </div>
+            <div class="chart-container">
+                <canvas id="exitReasonChart"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <div class="chart-title">
+                <span><i class="fa-solid fa-calendar-day" style="color: var(--accent-green);"></i> Net PnL by Day</span>
+            </div>
+            <div class="chart-container">
+                <canvas id="dailyPnlChart"></canvas>
             </div>
         </div>
     </div>
@@ -551,6 +597,8 @@
 <script>
     let equityChartInstance = null;
     let winPieChartInstance = null;
+    let exitReasonChartInstance = null;
+    let dailyPnlChartInstance = null;
     let rawTradesData = [];
 
     // Helper to format ISO date to YYYY-MM-DD
@@ -624,11 +672,12 @@
     async function fetchReportData() {
         const start = document.getElementById('startDate').value;
         const end = document.getElementById('endDate').value;
+        const mode = document.getElementById('modeSelect').value;
 
         if (!validateDates(start, end)) return;
 
         try {
-            const resp = await fetch(`/api/report_data?start_date=${start}&end_date=${end}`);
+            const resp = await fetch(`/api/report_data?start_date=${start}&end_date=${end}&execution_mode=${mode}`);
             const data = await resp.json();
 
             if (!resp.ok) {
@@ -664,7 +713,22 @@
         document.getElementById('subMaxDrawdown').innerText = `Rs ${data.max_drawdown_inr.toFixed(2)} Drop`;
 
         document.getElementById('valTotalTrades').innerText = `${data.total_trades} Trades`;
-        document.getElementById('subSessions').innerText = `NSE: ${data.nse_trades} | MCX: ${data.mcx_trades}`;
+        document.getElementById('subSessions').innerText = `NSE: ${data.nse_trades} | MCX: ${data.mcx_trades} (${data.open_trades} open)`;
+
+        // New analytics cards
+        const pf = data.profit_factor || 0;
+        document.getElementById('valProfitFactor').innerText = pf.toFixed(2);
+        document.getElementById('subRoi').innerText = `Net ROI: ${(data.net_roi_pct || 0).toFixed(2)}% | Avg ROI/Trade: ${(data.avg_roi_pct || 0).toFixed(2)}%`;
+
+        const exp = data.expectancy || 0;
+        document.getElementById('valExpectancy').innerText = (exp >= 0 ? '+Rs ' : '-Rs ') + Math.abs(exp).toFixed(2);
+        document.getElementById('valExpectancy').className = 'metric-val ' + (exp >= 0 ? 'text-green' : 'text-red');
+        document.getElementById('subAvgWinLoss').innerText = `Avg Win Rs ${(data.avg_win || 0).toFixed(2)} | Avg Loss Rs ${(data.avg_loss || 0).toFixed(2)}`;
+
+        const best = data.best_trade || null;
+        const worst = data.worst_trade || null;
+        document.getElementById('valBestWorst').innerText = best ? `+Rs ${best.net_pnl.toFixed(2)}` : 'Rs 0.00';
+        document.getElementById('subBestWorst').innerText = `Best: ${best ? best.option_symbol + ' ' + best.trade_date : '-'} | Worst: ${worst ? worst.option_symbol + ' ' + worst.trade_date : '-'}`;
 
         // 2. Render Table
         renderTable(rawTradesData);
@@ -672,6 +736,8 @@
         // 3. Render Charts
         renderEquityChart(rawTradesData, data.initial_capital);
         renderWinPieChart(data);
+        renderExitReasonChart(data.exit_reason_stats || {});
+        renderDailyPnlChart(data.daily_stats || []);
     }
 
     // Render Table Rows
@@ -786,14 +852,94 @@
         });
     }
 
+    // Render PnL by Exit Reason (bar chart)
+    function renderExitReasonChart(exitReasonStats) {
+        const ctx = document.getElementById('exitReasonChart').getContext('2d');
+        if (exitReasonChartInstance) exitReasonChartInstance.destroy();
+
+        const buckets = Object.keys(exitReasonStats).sort();
+        const labels = buckets.map(b => b);
+        const pnls = buckets.map(b => exitReasonStats[b].net_pnl || 0);
+        const tradeCounts = buckets.map(b => exitReasonStats[b].trades || 0);
+
+        exitReasonChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Net PnL (INR)',
+                    data: pnls,
+                    backgroundColor: pnls.map(p => p >= 0 ? '#22c55e' : '#ef4444'),
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            afterLabel: (ctx) => `Trades: ${tradeCounts[ctx.dataIndex]}`
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid: { color: 'rgba(255, 255, 255, 0.04)' }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+                    y: { grid: { color: 'rgba(255, 255, 255, 0.04)' }, ticks: { color: '#94a3b8', font: { size: 10 } } }
+                }
+            }
+        });
+    }
+
+    // Render Net PnL by Day (bar chart)
+    function renderDailyPnlChart(dailyStats) {
+        const ctx = document.getElementById('dailyPnlChart').getContext('2d');
+        if (dailyPnlChartInstance) dailyPnlChartInstance.destroy();
+
+        const labels = dailyStats.map(d => d.date || '');
+        const pnls = dailyStats.map(d => d.net_pnl || 0);
+        const counts = dailyStats.map(d => d.trades || 0);
+
+        dailyPnlChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Net PnL (INR)',
+                    data: pnls,
+                    backgroundColor: pnls.map(p => p >= 0 ? '#22c55e' : '#ef4444'),
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            afterLabel: (ctx) => `Trades: ${counts[ctx.dataIndex]}`
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid: { color: 'rgba(255, 255, 255, 0.04)' }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+                    y: { grid: { color: 'rgba(255, 255, 255, 0.04)' }, ticks: { color: '#94a3b8', font: { size: 10 } } }
+                }
+            }
+        });
+    }
+
     // Download PDF Action
     function downloadPdf() {
         const start = document.getElementById('startDate').value;
         const end = document.getElementById('endDate').value;
+        const mode = document.getElementById('modeSelect').value;
 
         if (!validateDates(start, end)) return;
 
-        window.location.href = `/download-report-pdf?start_date=${start}&end_date=${end}`;
+        window.location.href = `/download-report-pdf?start_date=${start}&end_date=${end}&execution_mode=${mode}`;
     }
 </script>
 

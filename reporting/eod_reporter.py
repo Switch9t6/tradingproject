@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import sqlite3
 import datetime
 from jinja2 import Template
-from config.settings import DB_FILE_PATH, REPORTS_DIR, INITIAL_WALLET_CAPITAL
+from config.settings import DB_FILE_PATH, REPORTS_DIR, INITIAL_WALLET_CAPITAL, TOKEN_FILE_PATH
 from execution.state_manager import StateManager
 
 HTML_TEMPLATE = """<!DOCTYPE html>
@@ -402,7 +402,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="header">
             <div class="header-title">
                 <h1>INTRADAY OPTIONS TRADING DASHBOARD</h1>
-                <div class="header-subtitle">Upstox API v2 Autonomous Options Execution Engine</div>
+                <div class="header-subtitle">Fyers API v3 Autonomous Options Execution Engine</div>
             </div>
             <div class="badges">
                 <span class="badge {{ 'badge-mode-dryrun' if is_dry_run else 'badge-mode-live' }}">
@@ -437,7 +437,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="metric-card">
                 <div class="metric-label">Win Rate</div>
                 <div class="metric-value" style="color: {{ 'var(--accent-green)' if win_rate_val >= 50 else 'var(--accent-amber)' }};">{{ win_rate_val }}%</div>
-                <div class="metric-subtext">{{ winning_trades }} Wins / {{ total_trades - winning_trades }} Losses</div>
+                <div class="metric-subtext">{{ winning_trades }} Wins / {{ losing_trades }} Losses{{ ' / ' ~ breakeven_trades ~ ' Even' if breakeven_trades > 0 else '' }}{{ ' (+' ~ open_trades ~ ' Open)' if open_trades > 0 else '' }}</div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Total Friction Fees</div>
@@ -530,25 +530,158 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
 
         <div class="footer">
-            <p>Upstox API v2 Autonomous Options Execution Engine | Security Verified Fund Compliance</p>
+            <p>Fyers API v3 Autonomous Options Execution Engine | Security Verified Fund Compliance</p>
         </div>
     </div>
 </body>
 </html>
 """
 
-def fetch_upstox_live_balance() -> tuple:
+def _fyers_broker_active() -> bool:
+    """True when Fyers is the configured broker-of-record (app-id present, not MOCK)."""
+    try:
+        from config.settings import FYERS_APP_ID
+        app_id = (FYERS_APP_ID or os.getenv("FYERS_APP_ID", "")).strip()
+        return bool(app_id) and not app_id.startswith("YOUR_")
+    except Exception:
+        return False
+
+
+def fetch_live_wallet_balance() -> float:
     """
-    Queries Upstox User API to get live available cash balance.
-    Returns (available_balance, utilized_amount).
+    Queries the live broker (Fyers first, Upstox fallback) for available cash.
+    Returns the available balance (0.0 if unavailable).
     """
     try:
-        from execution.upstox_trader import get_live_wallet_balance
-        avail = get_live_wallet_balance()
-        return avail, 0.0
+        from execution.fyers_trader import get_live_wallet_balance as fyers_balance
+        avail = fyers_balance()
+        if avail and avail > 0:
+            return float(avail)
+    except Exception as e:
+        print(f"[EOD Reporter - Fyers Balance Notice] {e}")
+    try:
+        from execution.upstox_trader import get_live_wallet_balance as upstox_balance
+        avail = upstox_balance()
+        if avail and avail > 0:
+            return float(avail)
     except Exception as e:
         print(f"[EOD Reporter - Upstox Balance Notice] {e}")
-    return 0.0, 0.0
+    return 0.0
+
+def fetch_fyers_live_trades(date_str: str = None) -> list:
+    """
+    Queries the Fyers tradebook API to fetch live executed trades for today.
+    Used as fallback when the local SQLite DB has no records.
+    Returns a list of dicts compatible with the trades table row schema.
+    """
+    if not date_str:
+        date_str = datetime.date.today().isoformat()
+    try:
+        import fyers_apiv3
+        from fyers_apiv3 import fyersModel
+        from execution.fyers_trader import get_active_fyers_token
+        from config.settings import FYERS_APP_ID
+        tok = get_active_fyers_token()
+        if not tok or tok.startswith("MOCK"):
+            return []
+        app_id = (FYERS_APP_ID or os.getenv("FYERS_APP_ID", "")).strip()
+        fyers = fyersModel.FyersModel(client_id=app_id, token=tok, is_async=False,
+                                       log_path=os.path.dirname(TOKEN_FILE_PATH))
+        tb = fyers.tradebook()
+        if not (isinstance(tb, dict) and tb.get("s") == "ok"):
+            return []
+        fills = [t for t in tb.get("tradeBook", []) if isinstance(t, dict)]
+        if not fills:
+            return []
+        today_ist = datetime.date.today().isoformat()
+
+        # Group fills by symbol, tracking buy/sell side and fill time
+        from collections import OrderedDict
+        groups = OrderedDict()
+        for f in fills:
+            sym = str(f.get("symbol") or "")
+            if not (sym.startswith("NSE:") or sym.startswith("MCX:")):
+                continue
+            qty = int(f.get("filledQty", 0) or 0)
+            if qty <= 0:
+                continue
+            side = str(f.get("side", "")).upper()
+            if side not in ("BUY", "SELL"):
+                continue
+            price = float(f.get("tradePrice") or f.get("price") or 0.0)
+            ts_raw = f.get("tradeTime") or f.get("exchTradeTime") or 0
+            try:
+                ts_raw = int(ts_raw)
+                ts_seconds = (ts_raw / 1000.0) if ts_raw > 1e12 else float(ts_raw)
+                fill_dt = datetime.datetime.fromtimestamp(ts_seconds)
+                if fill_dt.date().isoformat() != today_ist:
+                    continue
+                fill_time = fill_dt.strftime("%H:%M:%S")
+            except Exception:
+                fill_time = "09:30:00"
+            g = groups.setdefault(sym, {"buys": [], "sells": []})
+            g["buys" if side == "BUY" else "sells"].append((qty, price, fill_time))
+
+        trades = []
+        for i, (sym, g) in enumerate(groups.items(), 1):
+            if not g["buys"]:
+                continue
+            b_qty = sum(x[0] for x in g["buys"])
+            entry_p = round(sum(x[0] * x[1] for x in g["buys"]) / b_qty, 2)
+            entry_t = min(x[2] for x in g["buys"])
+            is_closed = bool(g["sells"])
+            exit_p = 0.0
+            exit_t = "OPEN"
+            if is_closed:
+                s_qty = sum(x[0] for x in g["sells"])
+                exit_p = round(sum(x[0] * x[1] for x in g["sells"]) / s_qty, 2)
+                exit_t = max(x[2] for x in g["sells"])
+
+            from reporting.friction_calculator import calculate_trade_friction
+            f_res = calculate_trade_friction(b_qty, entry_p, exit_p)
+            net_pnl_val = round(f_res["net_pnl"], 2) if is_closed else 0.0
+
+            target_p = round(entry_p * 1.25, 2)
+            stop_p = round(entry_p * 0.88, 2)
+            if is_closed:
+                if exit_p >= target_p:
+                    reason = "TARGET_HIT_+25%"
+                elif exit_p <= stop_p:
+                    reason = "STOP_LOSS_HIT"
+                else:
+                    reason = "MANUAL_EXIT"
+            else:
+                reason = "ACTIVE_HOLD"
+
+            trades.append({
+                "id": i,
+                "trade_date": today_ist,
+                "entry_time": entry_t,
+                "exit_time": exit_t,
+                "execution_mode": "LIVE",
+                "underlying_symbol": sym.split(":")[-1].split("26")[0] if ":" in sym else sym,
+                "option_symbol": sym,
+                "option_type": "CE" if sym.endswith("CE") else ("PE" if sym.endswith("PE") else "NA"),
+                "strike_price": 0.0,
+                "quantity": b_qty,
+                "entry_premium": entry_p,
+                "exit_premium": exit_p,
+                "target_price": target_p,
+                "stop_price": stop_p,
+                "gross_pnl": round(f_res["gross_pnl"], 2) if is_closed else 0.0,
+                "friction_fees": round(f_res["total_friction"], 2),
+                "net_pnl": net_pnl_val,
+                "roi_pct": round((net_pnl_val / (entry_p * b_qty)) * 100, 2) if entry_p * b_qty > 0 else 0.0,
+                "win_loss_status": "WIN" if net_pnl_val > 0 else ("LOSS" if net_pnl_val < 0 else ("EVEN" if is_closed else "OPEN")),
+                "exit_reason": reason,
+                "status": "CLOSED" if is_closed else "OPEN",
+                "exchange": "MCX_FO" if sym.startswith("MCX:") else "NSE_FO"
+            })
+        return trades
+    except Exception as e:
+        print(f"[EOD Reporter - Fyers Tradebook Notice] {e}")
+        return []
+
 
 def fetch_upstox_live_order_book_trades() -> list:
     """
@@ -663,13 +796,13 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
     state_mgr = StateManager()
     realtime_wallet = state_mgr.get_current_wallet_balance()
 
-    # In Live Mode, query Fyers/Upstox API for actual available cash balance
+    # In Live Mode, query the live broker API for actual available cash balance
     if not dry_run:
         try:
-            upstox_balance, _ = fetch_upstox_live_balance()
-            if upstox_balance > 0:
-                realtime_wallet = upstox_balance
-                state_mgr.state["current_wallet_balance"] = upstox_balance
+            live_balance = fetch_live_wallet_balance()
+            if live_balance > 0:
+                realtime_wallet = live_balance
+                state_mgr.state["current_wallet_balance"] = live_balance
                 state_mgr._save_state(state_mgr.state)
         except Exception:
             pass
@@ -698,9 +831,11 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
     except Exception as e:
         print(f"[EOD Reporter] DB read error: {e}")
 
-    # Fallback: fetch live trades directly from Upstox Order Book API
+    # Fallback: fetch live trades directly from broker order book APIs
     if not trades and not dry_run:
-        trades = fetch_upstox_live_order_book_trades()
+        trades = fetch_fyers_live_trades(date_str)
+        if not trades and not _fyers_broker_active():
+            trades = fetch_upstox_live_order_book_trades()
     
     from config.settings import DRY_RUN_MAX_TRADES_PER_SESSION, MAX_DAILY_TRADES
     max_cap = DRY_RUN_MAX_TRADES_PER_SESSION if dry_run else MAX_DAILY_TRADES
@@ -709,10 +844,13 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
     closed_trades = [t for t in trades if t.get("status") == "CLOSED"]
     open_trades = [t for t in trades if t.get("status") == "OPEN"]
     winning_trades = sum(1 for t in closed_trades if (t.get("net_pnl") or 0) > 0)
+    losing_trades = sum(1 for t in closed_trades if (t.get("net_pnl") or 0) < 0)
+    breakeven_trades = len(closed_trades) - winning_trades - losing_trades
     win_rate = round((winning_trades / len(closed_trades)) * 100.0, 2) if closed_trades else 0.0
     total_friction = round(sum((t.get("friction_fees") or 0.0) for t in closed_trades), 2)
     net_pnl = round(sum((t.get("net_pnl") or 0.0) for t in closed_trades), 2)
-    pnl_pct = round((net_pnl / INITIAL_WALLET_CAPITAL) * 100.0, 2)
+    pnl_base = realtime_wallet if realtime_wallet and realtime_wallet > 0 else INITIAL_WALLET_CAPITAL
+    pnl_pct = round((net_pnl / pnl_base) * 100.0, 2)
     
     mode_tag = "DRY-RUN SIMULATION" if dry_run else "LIVE PRODUCTION"
     file_prefix = "EOD_Report_DRYRUN_" if dry_run else "EOD_Report_LIVE_"
@@ -724,9 +862,8 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
     print("=" * 75)
     print(f"  Initial Capital Base     : Rs {INITIAL_WALLET_CAPITAL:,.2f} INR")
     print(f"  Real-Time Wallet Balance : Rs {realtime_wallet:,.2f} INR")
-    print(f"  Total Trades Executed    : {total_trades} / 1 (Max Daily Limit)")
-    print(f"  Winning Trades           : {winning_trades}")
-    print(f"  Win Rate                 : {win_rate}%")
+    print(f"  Total Trades Executed    : {total_trades} / {max_cap} (Max Daily Limit)")
+    print(f"  Winning Trades           : {winning_trades} (Win Rate: {win_rate}%)")
     print(f"  Total Friction Costs     : Rs {total_friction:,.2f} INR")
     print(f"  Net Daily PnL            : Rs {net_pnl:,.2f} INR ({pnl_pct:+,.2f}%)")
     print("-" * 75)
@@ -749,6 +886,9 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
         realtime_wallet=f"{realtime_wallet:,.2f}",
         total_trades=total_trades,
         winning_trades=winning_trades,
+        losing_trades=losing_trades,
+        breakeven_trades=breakeven_trades,
+        open_trades=len(open_trades),
         win_rate_val=win_rate,
         total_friction=f"{total_friction:,.2f}",
         net_pnl=f"{net_pnl:,.2f}",
@@ -782,13 +922,18 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
 
         nse_wins, nse_wr, nse_friction, nse_pnl = _segment_stats(nse_trades)
         mcx_wins, mcx_wr, mcx_friction, mcx_pnl = _segment_stats(mcx_trades)
+        nse_losing = sum(1 for t in nse_trades if t.get("status") == "CLOSED" and (t.get("net_pnl") or 0) < 0)
+        mcx_losing = sum(1 for t in mcx_trades if t.get("status") == "CLOSED" and (t.get("net_pnl") or 0) < 0)
 
         html_nse = template.render(
             date=date_str, mode_label="NSE DRY-RUN SIMULATION", is_dry_run=True,
             capital_base=f"{INITIAL_WALLET_CAPITAL:,.2f}", realtime_wallet=f"{realtime_wallet:,.2f}",
-            total_trades=len(nse_trades), winning_trades=nse_wins, win_rate_val=nse_wr,
+            total_trades=len(nse_trades), winning_trades=nse_wins, losing_trades=nse_losing,
+            breakeven_trades=max(0, len([t for t in nse_trades if t.get("status") == "CLOSED"]) - nse_wins - nse_losing),
+            open_trades=sum(1 for t in nse_trades if t.get("status") == "OPEN"),
+            win_rate_val=nse_wr,
             total_friction=f"{nse_friction:,.2f}", net_pnl=f"{nse_pnl:,.2f}",
-            pnl_pct=round((nse_pnl / INITIAL_WALLET_CAPITAL) * 100.0, 2),
+            pnl_pct=round((nse_pnl / pnl_base) * 100.0, 2),
             is_positive_pnl=(nse_pnl >= 0), max_cap=max_cap, trades=nse_trades
         )
         with open(nse_dry_path, "w", encoding="utf-8") as f:
@@ -797,9 +942,12 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
         html_mcx = template.render(
             date=date_str, mode_label="MCX DRY-RUN SIMULATION", is_dry_run=True,
             capital_base=f"{INITIAL_WALLET_CAPITAL:,.2f}", realtime_wallet=f"{realtime_wallet:,.2f}",
-            total_trades=len(mcx_trades), winning_trades=mcx_wins, win_rate_val=mcx_wr,
+            total_trades=len(mcx_trades), winning_trades=mcx_wins, losing_trades=mcx_losing,
+            breakeven_trades=max(0, len([t for t in mcx_trades if t.get("status") == "CLOSED"]) - mcx_wins - mcx_losing),
+            open_trades=sum(1 for t in mcx_trades if t.get("status") == "OPEN"),
+            win_rate_val=mcx_wr,
             total_friction=f"{mcx_friction:,.2f}", net_pnl=f"{mcx_pnl:,.2f}",
-            pnl_pct=round((mcx_pnl / INITIAL_WALLET_CAPITAL) * 100.0, 2),
+            pnl_pct=round((mcx_pnl / pnl_base) * 100.0, 2),
             is_positive_pnl=(mcx_pnl >= 0), max_cap=max_cap, trades=mcx_trades
         )
         with open(mcx_dry_path, "w", encoding="utf-8") as f:

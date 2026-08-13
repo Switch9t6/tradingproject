@@ -48,7 +48,8 @@ def validate_date_range(start_date: str, end_date: str) -> Tuple[bool, str]:
 def get_trade_report_data(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    execution_mode: Optional[str] = None
+    execution_mode: Optional[str] = None,
+    initial_capital: Optional[float] = None
 ) -> Dict[str, Any]:
     """
     Queries logs/trades.db for trades executed between start_date and end_date (inclusive).
@@ -57,6 +58,8 @@ def get_trade_report_data(
     :param start_date: ISO date string 'YYYY-MM-DD' (defaults to today)
     :param end_date: ISO date string 'YYYY-MM-DD' (defaults to start_date)
     :param execution_mode: Optional filter ('LIVE', 'DRY_RUN', or None for all)
+    :param initial_capital: Starting equity used for ROI / equity-curve math
+                            (defaults to INITIAL_WALLET_CAPITAL)
     :return: Dict containing summary metrics and itemized trade list
     """
     today_str = get_ist_today_str()
@@ -95,10 +98,13 @@ def get_trade_report_data(
             print(f"[TradeReport DB Error] {db_err}")
 
     # Fallback for Today's Live Trades if DB is empty and start_date == today
+    # Broker-of-record is Fyers (v3) now - Upstox order-book is a legacy last resort.
     if not trades and start_date == today_str and end_date == today_str:
         try:
-            from reporting.eod_reporter import fetch_upstox_live_order_book_trades
-            trades = fetch_upstox_live_order_book_trades()
+            from reporting.eod_reporter import fetch_fyers_live_trades, fetch_upstox_live_order_book_trades, _fyers_broker_active
+            trades = fetch_fyers_live_trades(start_date)
+            if not trades and not _fyers_broker_active():
+                trades = fetch_upstox_live_order_book_trades()
         except Exception:
             pass
 
@@ -109,6 +115,7 @@ def get_trade_report_data(
     winning_trades = 0
     losing_trades = 0
     breakeven_trades = 0
+    open_trades = 0
 
     gross_profit = 0.0
     gross_loss = 0.0
@@ -117,13 +124,56 @@ def get_trade_report_data(
     net_pnl = 0.0
 
     # Drawdown calculation variables
-    initial_capital = float(INITIAL_WALLET_CAPITAL)
+    initial_capital = float(initial_capital) if initial_capital and initial_capital > 0 else float(INITIAL_WALLET_CAPITAL)
     running_equity = initial_capital
     peak_equity = initial_capital
     max_drawdown_inr = 0.0
     max_drawdown_pct = 0.0
 
+    # Distribution / quality-of-execution statistics (CLOSED trades only)
+    win_pnls: List[float] = []
+    loss_pnls: List[float] = []
+    trade_rois: List[float] = []
+    hold_minutes_list: List[int] = []
+
+    # Breakdowns for dynamic charts
+    exit_reason_stats: Dict[str, Dict[str, Any]] = {}
+    session_stats: Dict[str, Dict[str, Any]] = {
+        "NSE_FO": {"trades": 0, "wins": 0, "losses": 0, "breakeven": 0, "net_pnl": 0.0, "win_rate": 0.0},
+        "MCX_FO": {"trades": 0, "wins": 0, "losses": 0, "breakeven": 0, "net_pnl": 0.0, "win_rate": 0.0},
+    }
+    mode_stats: Dict[str, Dict[str, Any]] = {}
+    daily_stats: Dict[str, Dict[str, Any]] = {}
+    equity_curve: List[Dict[str, Any]] = []
+
+    best_trade: Optional[Dict[str, Any]] = None
+    worst_trade: Optional[Dict[str, Any]] = None
+
     itemized_trades = []
+
+    def _exit_reason_bucket(reason: str) -> str:
+        r = str(reason or "").upper()
+        if "TARGET" in r:
+            return "TARGET_HIT"
+        if "TSL" in r or "TRAIL" in r:
+            return "TSL"
+        if "TIME" in r:
+            return "TIME_EXIT"
+        if "MANUAL" in r:
+            return "MANUAL"
+        if "STOP" in r or "SL" in r:
+            return "STOP_LOSS"
+        return "OTHER"
+
+    def _hold_minutes(entry_t, exit_t) -> int:
+        try:
+            fmt = "%H:%M:%S"
+            et = datetime.datetime.strptime(str(entry_t or "")[:8], fmt)
+            xt = datetime.datetime.strptime(str(exit_t or "")[:8], fmt)
+            delta = (xt - et).total_seconds() / 60.0
+            return int(max(0.0, delta))
+        except Exception:
+            return 0
 
     for idx, t in enumerate(trades, 1):
         # Session Segment Identification
@@ -139,31 +189,116 @@ def get_trade_report_data(
         t_gross = float(t.get("gross_pnl") or 0.0)
         t_friction = float(t.get("friction_fees") or 0.0)
         t_net = float(t.get("net_pnl") or (t_gross - t_friction))
+        is_open = str(t.get("status") or "CLOSED").upper() == "OPEN"
+        entry_p = float(t.get("entry_premium") or 0.0)
+        qty = int(t.get("quantity") or 0)
+        cost_basis = entry_p * qty
+        t_roi = round((t_net / cost_basis) * 100.0, 2) if cost_basis > 0 else 0.0
+        t_hold = _hold_minutes(t.get("entry_time"), t.get("exit_time"))
 
         gross_pnl += t_gross
         total_friction += t_friction
         net_pnl += t_net
+        if not is_open:
+            trade_rois.append(t_roi)
+            hold_minutes_list.append(t_hold)
 
-        if t_net > 0:
+        # Win / Loss / Breakeven classification (OPEN trades are excluded - they
+        # have no realized PnL yet and must not distort the win rate).
+        if is_open:
+            open_trades += 1
+        elif t_net > 0:
             winning_trades += 1
             gross_profit += t_net
+            win_pnls.append(t_net)
         elif t_net < 0:
             losing_trades += 1
             gross_loss += abs(t_net)
+            loss_pnls.append(t_net)
         else:
             breakeven_trades += 1
 
-        # Track Drawdown
-        running_equity += t_net
-        if running_equity > peak_equity:
-            peak_equity = running_equity
-        current_dd_inr = peak_equity - running_equity
-        current_dd_pct = (current_dd_inr / peak_equity * 100.0) if peak_equity > 0 else 0.0
+        # Track Drawdown (realized PnL only - unrealized OPEN positions excluded)
+        if not is_open:
+            running_equity += t_net
+            equity_curve.append({
+                "seq": len(equity_curve) + 1,
+                "label": f"Trade #{len(equity_curve) + 1}",
+                "date": t.get("trade_date", start_date),
+                "net_pnl": round(t_net, 2),
+                "equity": round(running_equity, 2),
+            })
+            if running_equity > peak_equity:
+                peak_equity = running_equity
+            current_dd_inr = peak_equity - running_equity
+            current_dd_pct = (current_dd_inr / peak_equity * 100.0) if peak_equity > 0 else 0.0
+            if current_dd_inr > max_drawdown_inr:
+                max_drawdown_inr = current_dd_inr
+            if current_dd_pct > max_drawdown_pct:
+                max_drawdown_pct = current_dd_pct
 
-        if current_dd_inr > max_drawdown_inr:
-            max_drawdown_inr = current_dd_inr
-        if current_dd_pct > max_drawdown_pct:
-            max_drawdown_pct = current_dd_pct
+        # Track best / worst realized trades
+        if not is_open:
+            if best_trade is None or t_net > best_trade["net_pnl"]:
+                best_trade = {"id": t.get("id", idx), "option_symbol": t.get("option_symbol", "N/A"),
+                              "trade_date": t.get("trade_date", start_date), "net_pnl": round(t_net, 2),
+                              "exit_reason": t.get("exit_reason", "N/A")}
+            if worst_trade is None or t_net < worst_trade["net_pnl"]:
+                worst_trade = {"id": t.get("id", idx), "option_symbol": t.get("option_symbol", "N/A"),
+                               "trade_date": t.get("trade_date", start_date), "net_pnl": round(t_net, 2),
+                               "exit_reason": t.get("exit_reason", "N/A")}
+
+        # Exit-reason breakdown
+        bucket = _exit_reason_bucket(t.get("exit_reason"))
+        if bucket not in exit_reason_stats:
+            exit_reason_stats[bucket] = {"trades": 0, "wins": 0, "losses": 0, "net_pnl": 0.0}
+        exit_reason_stats[bucket]["trades"] += 1
+        exit_reason_stats[bucket]["net_pnl"] = round(exit_reason_stats[bucket]["net_pnl"] + t_net, 2)
+        if not is_open:
+            if t_net > 0:
+                exit_reason_stats[bucket]["wins"] += 1
+            elif t_net < 0:
+                exit_reason_stats[bucket]["losses"] += 1
+
+        # Session breakdown
+        s = session_stats[session_tag]
+        s["trades"] += 1
+        s["net_pnl"] = round(s["net_pnl"] + t_net, 2)
+        if is_open:
+            pass
+        elif t_net > 0:
+            s["wins"] += 1
+        elif t_net < 0:
+            s["losses"] += 1
+        else:
+            s["breakeven"] += 1
+
+        # Mode breakdown
+        mode = str(t.get("execution_mode") or "LIVE")
+        if mode not in mode_stats:
+            mode_stats[mode] = {"trades": 0, "wins": 0, "losses": 0, "net_pnl": 0.0, "win_rate": 0.0}
+        m = mode_stats[mode]
+        m["trades"] += 1
+        m["net_pnl"] = round(m["net_pnl"] + t_net, 2)
+        if is_open:
+            pass
+        elif t_net > 0:
+            m["wins"] += 1
+        elif t_net < 0:
+            m["losses"] += 1
+
+        # Daily breakdown
+        d = str(t.get("trade_date") or start_date)
+        if d not in daily_stats:
+            daily_stats[d] = {"date": d, "trades": 0, "net_pnl": 0.0, "wins": 0, "losses": 0}
+        daily_stats[d]["trades"] += 1
+        daily_stats[d]["net_pnl"] = round(daily_stats[d]["net_pnl"] + t_net, 2)
+        if is_open:
+            pass
+        elif t_net > 0:
+            daily_stats[d]["wins"] += 1
+        elif t_net < 0:
+            daily_stats[d]["losses"] += 1
 
         itemized_trades.append({
             "id": t.get("id", idx),
@@ -175,26 +310,52 @@ def get_trade_report_data(
             "option_symbol": t.get("option_symbol", "N/A"),
             "option_type": t.get("option_type", "CE"),
             "strike_price": float(t.get("strike_price") or 0.0),
-            "quantity": int(t.get("quantity") or 0),
-            "entry_premium": float(t.get("entry_premium") or 0.0),
+            "quantity": qty,
+            "entry_premium": round(entry_p, 2),
             "exit_premium": float(t.get("exit_premium") or 0.0),
             "target_price": float(t.get("target_price") or 0.0),
             "stop_price": float(t.get("stop_price") or 0.0),
             "gross_pnl": round(t_gross, 2),
             "friction_fees": round(t_friction, 2),
             "net_pnl": round(t_net, 2),
+            "roi_pct": t_roi,
+            "hold_minutes": t_hold,
             "status": t.get("status", "CLOSED"),
-            "exit_reason": t.get("exit_reason", "N/A"),
-            "exchange": session_tag
+            "exit_reason": t.get("exit_reason") or "N/A",
+            "exchange": session_tag,
+            "win_loss_status": "WIN" if (not is_open and t_net > 0) else ("LOSS" if (not is_open and t_net < 0) else ("EVEN" if not is_open else "OPEN"))
         })
 
-    win_rate = round((winning_trades / total_trades * 100.0), 2) if total_trades > 0 else 0.0
+    closed_count = total_trades - open_trades
+    win_rate = round((winning_trades / closed_count * 100.0), 2) if closed_count > 0 else 0.0
     profit_factor = round((gross_profit / gross_loss), 2) if gross_loss > 0 else (round(gross_profit, 2) if gross_profit > 0 else 0.0)
+
+    # Quality-of-execution derived metrics (CLOSED trades only)
+    avg_win = round(sum(win_pnls) / len(win_pnls), 2) if win_pnls else 0.0
+    avg_loss = round(abs(sum(loss_pnls)) / len(loss_pnls), 2) if loss_pnls else 0.0
+    win_rate_frac = (winning_trades / closed_count) if closed_count > 0 else 0.0
+    loss_rate_frac = (losing_trades / closed_count) if closed_count > 0 else 0.0
+    expectancy = round((win_rate_frac * avg_win) - (loss_rate_frac * avg_loss), 2)
+    avg_win_loss_ratio = round((avg_win / avg_loss), 2) if avg_loss > 0 else (round(avg_win, 2) if avg_win > 0 else 0.0)
+    net_roi_pct = round((net_pnl / initial_capital) * 100.0, 2) if initial_capital > 0 else 0.0
+    avg_roi_pct = round((sum(trade_rois) / len(trade_rois)), 2) if trade_rois else 0.0
+    avg_hold_minutes = int(sum(hold_minutes_list) / len(hold_minutes_list)) if hold_minutes_list else 0
+
+    # Session win rates
+    for s_tag, s in session_stats.items():
+        s_closed = s["wins"] + s["losses"] + s["breakeven"]
+        s["win_rate"] = round((s["wins"] / s_closed * 100.0), 2) if s_closed > 0 else 0.0
+        s["trades"] = s["trades"]
+    for m_tag, m in mode_stats.items():
+        m_closed = m["wins"] + m["losses"]
+        m["win_rate"] = round((m["wins"] / m_closed * 100.0), 2) if m_closed > 0 else 0.0
 
     return {
         "start_date": start_date,
         "end_date": end_date,
         "total_trades": total_trades,
+        "open_trades": open_trades,
+        "closed_trades": closed_count,
         "nse_trades": nse_trades,
         "mcx_trades": mcx_trades,
         "winning_trades": winning_trades,
@@ -204,10 +365,24 @@ def get_trade_report_data(
         "gross_pnl": round(gross_pnl, 2),
         "total_friction": round(total_friction, 2),
         "net_pnl": round(net_pnl, 2),
+        "net_roi_pct": net_roi_pct,
+        "avg_roi_pct": avg_roi_pct,
+        "avg_hold_minutes": avg_hold_minutes,
         "profit_factor": profit_factor,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "avg_win_loss_ratio": avg_win_loss_ratio,
+        "expectancy": expectancy,
+        "best_trade": best_trade,
+        "worst_trade": worst_trade,
         "max_drawdown_inr": round(max_drawdown_inr, 2),
         "max_drawdown_pct": round(max_drawdown_pct, 2),
         "initial_capital": initial_capital,
+        "exit_reason_stats": exit_reason_stats,
+        "session_stats": session_stats,
+        "mode_stats": mode_stats,
+        "daily_stats": [daily_stats[k] for k in sorted(daily_stats.keys())],
+        "equity_curve": equity_curve,
         "itemized_trades": itemized_trades
     }
 
@@ -323,6 +498,18 @@ def generate_html_report_file(start_date: Optional[str] = None, end_date: Option
             <div class="metric-label">Session Breakdown</div>
             <div class="metric-val">{data['total_trades']} Trades</div>
             <div class="metric-sub">NSE: {data['nse_trades']} | MCX: {data['mcx_trades']}</div>
+        </div>
+
+        <div class="metric-card blue">
+            <div class="metric-label">Profit Factor</div>
+            <div class="metric-val">{data['profit_factor']:.2f}</div>
+            <div class="metric-sub">Net ROI: {data['net_roi_pct']:+,.2f}%</div>
+        </div>
+
+        <div class="metric-card green">
+            <div class="metric-label">Expectancy / Trade</div>
+            <div class="metric-val text-{'green' if data['expectancy'] >= 0 else 'red'}">{'+' if data['expectancy'] >= 0 else ''}Rs {abs(data['expectancy']):,.2f}</div>
+            <div class="metric-sub">Avg Win Rs {data['avg_win']:,.2f} | Avg Loss Rs {data['avg_loss']:,.2f}</div>
         </div>
     </div>
 

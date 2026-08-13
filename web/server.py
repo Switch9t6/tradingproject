@@ -47,18 +47,22 @@ def fyers_webhook():
 def api_report_data():
     """
     AJAX Endpoint: Returns performance report data as JSON.
-    Query parameters: start_date (YYYY-MM-DD), end_date (YYYY-MM-DD).
+    Query parameters: start_date (YYYY-MM-DD), end_date (YYYY-MM-DD),
+    execution_mode (ALL | LIVE | DRY_RUN).
     """
     today_str = get_ist_today_str()
     start_date = request.args.get("start_date", today_str)
     end_date = request.args.get("end_date", start_date)
+    execution_mode = request.args.get("execution_mode", "").strip().upper() or None
+    if execution_mode not in (None, "LIVE", "DRY_RUN"):
+        return jsonify({"error": "execution_mode must be one of: ALL, LIVE, DRY_RUN"}), 400
 
     is_valid, err_msg = validate_date_range(start_date, end_date)
     if not is_valid:
         return jsonify({"error": err_msg}), 400
 
     try:
-        data = get_trade_report_data(start_date=start_date, end_date=end_date)
+        data = get_trade_report_data(start_date=start_date, end_date=end_date, execution_mode=execution_mode)
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -73,13 +77,18 @@ def download_report_pdf():
     today_str = get_ist_today_str()
     start_date = request.args.get("start_date", today_str)
     end_date = request.args.get("end_date", start_date)
+    execution_mode = request.args.get("execution_mode", "").strip().upper() or None
+    if execution_mode not in (None, "LIVE", "DRY_RUN"):
+        return jsonify({"error": "execution_mode must be one of: ALL, LIVE, DRY_RUN"}), 400
 
     is_valid, err_msg = validate_date_range(start_date, end_date)
     if not is_valid:
         return jsonify({"error": err_msg}), 400
 
     try:
-        pdf_bytes, filename = generate_trade_report_pdf(start_date=start_date, end_date=end_date)
+        pdf_bytes, filename = generate_trade_report_pdf(
+            start_date=start_date, end_date=end_date, execution_mode=execution_mode
+        )
         return send_file(
             io.BytesIO(pdf_bytes),
             mimetype="application/pdf",

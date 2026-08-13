@@ -21,19 +21,20 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 from reports.trade_report import get_trade_report_data, validate_date_range, IST_TZ
 
-def generate_trade_report_pdf(start_date: str, end_date: str) -> Tuple[bytes, str]:
+def generate_trade_report_pdf(start_date: str, end_date: str, execution_mode: Optional[str] = None) -> Tuple[bytes, str]:
     """
     Generates a PDF document for the given date range.
 
     :param start_date: ISO date string 'YYYY-MM-DD'
     :param end_date: ISO date string 'YYYY-MM-DD'
+    :param execution_mode: Optional filter ('LIVE', 'DRY_RUN', or None for all)
     :return: Tuple of (pdf_bytes, filename)
     """
     is_valid, err_msg = validate_date_range(start_date, end_date)
     if not is_valid:
         raise ValueError(err_msg)
 
-    data = get_trade_report_data(start_date, end_date)
+    data = get_trade_report_data(start_date, end_date, execution_mode=execution_mode)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -151,8 +152,8 @@ def generate_trade_report_pdf(start_date: str, end_date: str) -> Tuple[bytes, st
         [
             Paragraph("<b>Max Drawdown:</b>", cell_normal_style),
             Paragraph(f"<b>{data['max_drawdown_pct']:.2f}%</b> (Rs {data['max_drawdown_inr']:,.2f})", cell_bold_style),
-            Paragraph("<b>Broker Segment Sync:</b>", cell_normal_style),
-            Paragraph("Upstox Live Verified", cell_bold_style)
+            Paragraph("<b>Expectancy / Trade:</b>", cell_normal_style),
+            Paragraph(f"<b>Rs {data['expectancy']:+,.2f}</b> (Avg Win Rs {data['avg_win']:,.2f} / Avg Loss Rs {data['avg_loss']:,.2f})", cell_bold_style)
         ]
     ]
 
@@ -197,7 +198,7 @@ def generate_trade_report_pdf(start_date: str, end_date: str) -> Tuple[bytes, st
                 Paragraph(str(t['quantity']), cell_normal_style),
                 Paragraph(f"Rs {t['entry_premium']:.2f}", cell_normal_style),
                 Paragraph(f"Rs {t['exit_premium']:.2f}", cell_normal_style),
-                Paragraph(t['exit_reason'], cell_normal_style),
+                Paragraph(str(t['exit_reason'] or 'N/A'), cell_normal_style),
                 pnl_cell
             ]
             trade_rows.append(row)
@@ -225,8 +226,8 @@ def generate_trade_report_pdf(start_date: str, end_date: str) -> Tuple[bytes, st
 
     # 4. Footer & Compliance Note
     footer_text = Paragraph(
-        "<i>This performance report is generated directly from Upstox API v2 live broker order execution logs & SQLite trades database.<br/>"
-        "0% Mock / Contamination Verified | Upstox API v2 Integration</i>",
+        "<i>This performance report is generated from live broker order execution logs & the SQLite trades database.<br/>"
+        "Quantitative Factor Engine | Fyers API v3 / NSE_FO + MCX_FO Integration</i>",
         subtitle_style
     )
     story.append(KeepTogether([HRFlowable(width="100%", thickness=0.5, color=SECONDARY_COLOR, spaceAfter=6), footer_text]))

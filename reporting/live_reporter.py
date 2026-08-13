@@ -7,7 +7,7 @@ from jinja2 import Template
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config.settings import DB_FILE_PATH, REPORTS_DIR, TOKEN_FILE_PATH, INITIAL_WALLET_CAPITAL
+from config.settings import DB_FILE_PATH, REPORTS_DIR, INITIAL_WALLET_CAPITAL, MAX_DAILY_TRADES
 from execution.state_manager import StateManager
 
 LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
@@ -15,7 +15,7 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>DhanHQ Live Audit Dashboard | {{ date }}</title>
+    <title>Fyers Live Audit Dashboard | {{ date }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -410,12 +410,12 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         <!-- Header Banner -->
         <div class="header">
             <div class="header-title">
-                <h1>REAL-TIME UPSTOX LIVE MARKET DASHBOARD</h1>
+                <h1>REAL-TIME FYERS LIVE MARKET DASHBOARD</h1>
                 <div class="header-subtitle">100% Real Live Trading Audit (Zero Dry-Run / Zero Mock Data)</div>
             </div>
             <div class="badges">
                 <span class="badge badge-live">🚀 LIVE PRODUCTION TRADES ONLY</span>
-                <span class="badge badge-security">🔒 UPSTOX API SYNCED</span>
+                <span class="badge badge-security">🔒 FYERS API SYNCED</span>
                 <span class="badge badge-date">📅 {{ date }}</span>
             </div>
         </div>
@@ -423,9 +423,9 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         <!-- Metrics Grid -->
         <div class="metrics-grid">
             <div class="metric-card">
-                <div class="metric-label">Upstox Live Available Cash</div>
+                <div class="metric-label">Fyers Live Available Cash</div>
                 <div class="metric-value" style="color: var(--accent-green);">Rs {{ live_balance }}</div>
-                <div class="metric-subtext">Used Margin: Rs {{ used_margin }}</div>
+                <div class="metric-subtext">Base Capital: Rs {{ capital_base }}</div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Live Daily Net PnL</div>
@@ -433,18 +433,18 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                     {{ '+' if is_positive_pnl else '' }}Rs {{ net_pnl }}
                 </div>
                 <div class="metric-subtext {{ 'pnl-positive' if is_positive_pnl else 'pnl-negative' }}">
-                    Real Live Realized Return
+                    {{ '+' if is_positive_pnl else '' }}{{ pnl_pct }}% Realized Return
                 </div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Live Trades Executed</div>
-                <div class="metric-value" style="color: var(--text-main);">{{ total_trades }} / 1</div>
-                <div class="metric-subtext">Max Daily Cap: 1 Trade</div>
+                <div class="metric-value" style="color: var(--text-main);">{{ total_trades }} / {{ max_cap }}</div>
+                <div class="metric-subtext">Max Daily Cap: {{ max_cap }} Trade{{ 's' if max_cap > 1 else '' }}</div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Live Win Rate</div>
                 <div class="metric-value" style="color: {{ 'var(--accent-green)' if win_rate_val >= 50 else 'var(--accent-amber)' }};">{{ win_rate_val }}%</div>
-                <div class="metric-subtext">{{ winning_trades }} Wins / {{ total_trades - winning_trades }} Losses</div>
+                <div class="metric-subtext">{{ winning_trades }} Wins / {{ losing_trades }} Losses{{ ' / ' ~ breakeven_trades ~ ' Even' if breakeven_trades > 0 else '' }}{{ ' (+' ~ open_trades ~ ' Open)' if open_trades > 0 else '' }}</div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Live Taxes & Friction</div>
@@ -516,7 +516,7 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
 
         <div class="footer">
-            <p>Upstox API v2 Live Real-Time Production Reporter | 0% Dry-Run Contamination Verified</p>
+            <p>Fyers API v3 Live Real-Time Production Reporter | 0% Dry-Run Contamination Verified</p>
         </div>
     </div>
 </body>
@@ -540,18 +540,25 @@ def extract_equity_margin(res) -> tuple[float, float]:
         print(f"[Margin Parsing Exception] {e}")
     return 100000.0, 0.0
 
-def fetch_upstox_live_balance_for_report() -> tuple:
+def fetch_live_wallet_balance_for_report() -> float:
     """
-    Queries Upstox API to fetch live available cash balance.
-    Returns (available_balance, utilized_amount).
+    Queries the live broker (Fyers first, Upstox fallback) for available cash.
     """
     try:
-        from execution.upstox_trader import get_live_wallet_balance
-        avail = get_live_wallet_balance()
-        return avail, 0.0
+        from execution.fyers_trader import get_live_wallet_balance as fyers_balance
+        avail = fyers_balance()
+        if avail and avail > 0:
+            return float(avail)
+    except Exception as e:
+        print(f"[Live Reporter - Fyers Balance Notice] {e}")
+    try:
+        from execution.upstox_trader import get_live_wallet_balance as upstox_balance
+        avail = upstox_balance()
+        if avail and avail > 0:
+            return float(avail)
     except Exception as e:
         print(f"[Live Reporter - Upstox Balance Notice] {e}")
-    return 0.0, 0.0
+    return 0.0
 
 
 def fetch_upstox_live_order_book_trades_for_report(date_str: str) -> list:
@@ -634,7 +641,7 @@ def fetch_upstox_live_order_book_trades_for_report(date_str: str) -> list:
 
 def generate_live_market_report(date_str: str = None) -> str:
     """
-    Fetches actual real-time Upstox account balance directly from Upstox API v2
+    Fetches actual real-time broker account balance (Fyers first, Upstox fallback)
     and queries SQLite DB strictly for 'LIVE' execution_mode trade records.
     EXCLUDES all dry-run, mock, or simulated data.
     """
@@ -643,10 +650,12 @@ def generate_live_market_report(date_str: str = None) -> str:
 
     os.makedirs(REPORTS_DIR, exist_ok=True)
 
-    # 1. Query Actual Upstox Live Fund Balance
-    live_balance, used_margin = fetch_upstox_live_balance_for_report()
+    # 1. Query Actual Live Broker Fund Balance (Fyers first, Upstox fallback)
+    live_balance = fetch_live_wallet_balance_for_report()
     if live_balance <= 0:
-        live_balance = INITIAL_WALLET_CAPITAL
+        state_mgr = StateManager()
+        state_bal = state_mgr.get_current_wallet_balance()
+        live_balance = state_bal if state_bal and state_bal > 0 else INITIAL_WALLET_CAPITAL
 
     # Sync state.json with actual live balance
     state_mgr = StateManager()
@@ -666,28 +675,38 @@ def generate_live_market_report(date_str: str = None) -> str:
     except Exception:
         pass
 
-    # Fallback: fetch live trades from Upstox Order Book API
+    # Fallback: fetch live trades from broker order book API (Fyers first, Upstox last resort)
     if not trades:
-        trades = fetch_upstox_live_order_book_trades_for_report(date_str)
+        try:
+            from reporting.eod_reporter import fetch_fyers_live_trades, _fyers_broker_active
+            trades = fetch_fyers_live_trades(date_str)
+            if not trades and not _fyers_broker_active():
+                trades = fetch_upstox_live_order_book_trades_for_report(date_str)
+        except Exception:
+            trades = fetch_upstox_live_order_book_trades_for_report(date_str)
     
     total_trades = len(trades)
-    winning_trades = sum(1 for t in trades if (t.get("net_pnl") or 0) > 0)
-    win_rate = round((winning_trades / total_trades) * 100.0, 2) if total_trades > 0 else 0.0
-    total_friction = round(sum((t.get("friction_fees") or 0.0) for t in trades), 2)
-    net_pnl = round(sum((t.get("net_pnl") or 0.0) for t in trades), 2)
+    closed_trades = [t for t in trades if t.get("status") == "CLOSED"]
+    open_trades = [t for t in trades if t.get("status") == "OPEN"]
+    winning_trades = sum(1 for t in closed_trades if (t.get("net_pnl") or 0) > 0)
+    losing_trades = sum(1 for t in closed_trades if (t.get("net_pnl") or 0) < 0)
+    breakeven_trades = len(closed_trades) - winning_trades - losing_trades
+    win_rate = round((winning_trades / len(closed_trades)) * 100.0, 2) if closed_trades else 0.0
+    total_friction = round(sum((t.get("friction_fees") or 0.0) for t in closed_trades), 2)
+    net_pnl = round(sum((t.get("net_pnl") or 0.0) for t in closed_trades), 2)
+    pnl_pct = round((net_pnl / live_balance) * 100.0, 2) if live_balance > 0 else 0.0
 
     # 3. Output Pure Live Console Audit
     print("\n" + "=" * 75)
-    print(f"       REAL-TIME UPSTOX LIVE MARKET AUDIT REPORT [LIVE MODE ONLY]      ")
+    print(f"       REAL-TIME FYERS LIVE MARKET AUDIT REPORT [LIVE MODE ONLY]      ")
     print(f"       Session Date: {date_str} | Generated at {datetime.datetime.now().strftime('%H:%M:%S')} IST      ")
     print("=" * 75)
-    print(f"  Upstox Live Cash Balance  : Rs {live_balance:,.2f} INR")
-    print(f"  Used Margin               : Rs {used_margin:,.2f} INR")
-    print(f"  Live Real Trades Executed       : {total_trades} / 1")
+    print(f"  Fyers Live Cash Balance  : Rs {live_balance:,.2f} INR")
+    print(f"  Live Real Trades Executed       : {total_trades} / {MAX_DAILY_TRADES}")
     print(f"  Winning Live Trades             : {winning_trades}")
     print(f"  Live Win Rate                   : {win_rate}%")
     print(f"  Live Taxes & Friction           : Rs {total_friction:,.2f} INR")
-    print(f"  Live Net Realized PnL           : Rs {net_pnl:,.2f} INR")
+    print(f"  Live Net Realized PnL           : Rs {net_pnl:,.2f} INR ({pnl_pct:+,.2f}%)")
     print("-" * 75)
     
     if trades:
@@ -703,14 +722,19 @@ def generate_live_market_report(date_str: str = None) -> str:
     template = Template(LIVE_HTML_TEMPLATE)
     html_output = template.render(
         date=date_str,
+        capital_base=f"{INITIAL_WALLET_CAPITAL:,.2f}",
         live_balance=f"{live_balance:,.2f}",
-        used_margin=f"{used_margin:,.2f}",
         total_trades=total_trades,
         winning_trades=winning_trades,
+        losing_trades=losing_trades,
+        breakeven_trades=breakeven_trades,
+        open_trades=len(open_trades),
         win_rate_val=win_rate,
         total_friction=f"{total_friction:,.2f}",
         net_pnl=f"{net_pnl:,.2f}",
+        pnl_pct=pnl_pct,
         is_positive_pnl=(net_pnl >= 0),
+        max_cap=MAX_DAILY_TRADES,
         trades=trades
     )
     
