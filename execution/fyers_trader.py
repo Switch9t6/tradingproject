@@ -86,58 +86,85 @@ def auto_generate_fyers_token(force: bool = False) -> str:
             print("[Fyers Auth Exception] Missing Fyers credentials in .env file.")
             return get_active_fyers_token()
 
-        # Step 1: Send Login Request
         session = requests.Session()
-        headers = {"Content-Type": "application/json"}
-        
-        # Step 1: Send FY ID & App ID
-        url_step1 = "https://api-t1.fyers.in/api/v3/generate-authcode"
+        headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+
+        # Step 1: Send FY ID (web login app_id "2") -> request_key
+        url_step1 = "https://api-t2.fyers.in/vagator/v2/send_login_otp"
         payload_step1 = {
             "fy_id": username,
-            "app_id": app_id.split("-")[0] if "-" in app_id else app_id,
-            "redirect_uri": redirect_uri,
-            "appType": "100"
+            "app_id": "2"
         }
-        res1 = session.post(url_step1, json=payload_step1, headers=headers, timeout=15).json()
-        request_key = res1.get("request_key")
-
+        res1 = session.post(url_step1, json=payload_step1, headers=headers, timeout=20)
+        res1j = res1.json()
+        request_key = res1j.get("request_key")
         if not request_key:
-            print(f"[Fyers Auth Step 1 Notice] {res1}")
+            print(f"[Fyers Auth Step 1 Notice] status={res1.status_code} {res1j}")
 
-        # Step 2: Validate TOTP
+        # Step 2: Validate TOTP -> new request_key
         totp_code = pyotp.TOTP(totp_secret.replace(" ", "").upper()).now()
-        url_step2 = "https://api-t1.fyers.in/api/v3/validate-totp"
+        url_step2 = "https://api-t2.fyers.in/vagator/v2/verify_otp"
         payload_step2 = {
             "request_key": request_key,
-            "totp": totp_code
+            "otp": totp_code
         }
-        res2 = session.post(url_step2, json=payload_step2, headers=headers, timeout=15).json()
-        request_key = res2.get("request_key", request_key)
+        res2 = session.post(url_step2, json=payload_step2, headers=headers, timeout=20)
+        res2j = res2.json()
+        if res2j.get("s") != "ok" or not res2j.get("request_key"):
+            print(f"[Fyers Auth Step 2 Notice] status={res2.status_code} {res2j}")
+        request_key = res2j.get("request_key", request_key)
 
-        # Step 3: Validate PIN
-        url_step3 = "https://api-t1.fyers.in/api/v3/validate-pin"
+        # Step 3: Validate PIN -> trade access token
+        url_step3 = "https://api-t2.fyers.in/vagator/v2/verify_pin"
         payload_step3 = {
             "request_key": request_key,
-            "pin": pin_code
+            "identity_type": "pin",
+            "identifier": pin_code
         }
-        res3 = session.post(url_step3, json=payload_step3, headers=headers, timeout=15).json()
-        auth_code = res3.get("auth_code") or (res3.get("data") or {}).get("auth_code")
+        res3 = session.post(url_step3, json=payload_step3, headers=headers, timeout=20)
+        res3j = res3.json()
+        trade_token = (res3j.get("data") or {}).get("access_token")
+        if not trade_token:
+            print(f"[Fyers Auth Step 3 Notice] status={res3.status_code} {res3j}")
 
-        if not auth_code:
-            print(f"[Fyers Auth Step 3 Notice] {res3}")
+        auth_code = ""
+        if trade_token:
+            # Step 4: Exchange trade token for v3 auth_code (308 redirect carries Url with auth_code)
+            import hashlib
+            from urllib.parse import urlparse, parse_qs
+            app_id_core = app_id.split("-")[0] if "-" in app_id else app_id
+            app_type = app_id.split("-")[1] if "-" in app_id else "100"
+            url_step4 = "https://api-t1.fyers.in/api/v3/token"
+            payload_step4 = {
+                "fyers_id": username,
+                "app_id": app_id_core,
+                "redirect_uri": redirect_uri,
+                "appType": app_type,
+                "code_challenge": "",
+                "state": "sample_state",
+                "scope": "",
+                "nonce": "",
+                "response_type": "code",
+                "create_cookie": True
+            }
+            res4 = session.post(url_step4, json=payload_step4, headers={**headers, "Authorization": f"Bearer {trade_token}"}, timeout=20, allow_redirects=False)
+            try:
+                token_url = res4.json().get("Url", "")
+                auth_code = parse_qs(urlparse(token_url).query).get("auth_code", [""])[0]
+            except Exception as parse_err:
+                print(f"[Fyers Auth Step 4 Notice] status={res4.status_code} parse_err={parse_err} body={res4.text[:300]}")
 
         if auth_code:
-            # Step 4: Exchange Auth Code for Access Token
-            import hashlib
+            # Step 5: Exchange Auth Code for v3 Access Token
             app_id_hash = hashlib.sha256(f"{app_id}:{secret_key}".encode()).hexdigest()
-            url_step4 = "https://api-t1.fyers.in/api/v3/validate-authcode"
-            payload_step4 = {
+            url_step5 = "https://api-t1.fyers.in/api/v3/validate-authcode"
+            payload_step5 = {
                 "grant_type": "authorization_code",
                 "appIdHash": app_id_hash,
                 "code": auth_code
             }
-            res4 = session.post(url_step4, json=payload_step4, headers=headers, timeout=15).json()
-            access_token = res4.get("access_token")
+            res5 = session.post(url_step5, json=payload_step5, headers=headers, timeout=20).json()
+            access_token = res5.get("access_token")
 
             if access_token:
                 os.environ["FYERS_ACCESS_TOKEN"] = access_token
