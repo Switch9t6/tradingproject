@@ -130,9 +130,39 @@ MIN_RS_THRESHOLD = 0.0030                 # Stock must outperform NIFTY by >= +0
 LIMIT_ORDER_BUFFER_PCT = 0.005            # 0.5% Aggressive limit order buffer
 LIMIT_ORDER_TIMEOUT_SECONDS = 5           # 5-second fill timeout
 
+# Option Selection Guardrails (real-data gates are enforced only when live
+# Fyers option-chain/quotes data is available; estimation mode never fakes a gate)
 TARGET_DELTA_MIN = 0.50
 TARGET_DELTA_MAX = 0.55
 MAX_BID_ASK_SPREAD_PCT = 0.015            # Reject contract if Bid-Ask Spread > 1.5%
+
+# Momentum-based OTM strike selection (option_mapper.py): the engine snaps spot to
+# the nearest strike (half-up rounding) then moves the strike OTM by steps based on
+# momentum strength, so the option is cheaper and more leveraged while staying
+# inside the delta band below.
+MOMENTUM_MODERATE_PCT = 1.0    # |momentum| >= 1%  -> 1 strike OTM
+MOMENTUM_STRONG_PCT   = 2.0    # |momentum| >= 2%  -> 2 strikes OTM
+MAX_STRIKE_OFFSET     = 3      # hard cap: never more than 3 strikes OTM
+# Strict fallback guard: when the exact strike is missing from the master cache,
+# the nearest-available-strike fallback is ONLY used if its deviation from the
+# target strike is within this many strike steps. Otherwise the trade is SKIPPED
+# (STRIKE_OUT_OF_BOUNDS_OR_MISSING) - never trade a wrong/deep ITM strike from a
+# stale cache. For MCX Crude (50-pt steps) 2 steps = 100 points.
+MAX_STRIKE_DEVIATION_STEPS = 2
+# Dynamic wallet allocation: per-trade usable budget derived from LIVE available
+# broker cash. Never commit more than this fraction of usable cash, and reserve
+# an extra buffer for order slippage/charges.
+MAX_ALLOCATION_PCT = 0.80     # use at most 80% of available wallet cash
+SLIPPAGE_BUFFER_PCT = 0.02    # reserve 2% for slippage + brokerage/STT
+# Real-data delta band for the selected (ATM-to-OTM) strike. Enforced ONLY when
+# live option-chain greeks are returned by Fyers; absent greeks -> estimate mode.
+OPTION_DELTA_MIN = 0.25
+OPTION_DELTA_MAX = 0.70
+# Real open-interest liquidity filter. OI is read from live option-chain data;
+# it only rejects a contract when this flag is True AND real OI is available.
+ENABLE_OI_FILTER = False
+NSE_MIN_OPTION_OPEN_INTEREST = 100000
+MCX_MIN_OPTION_OPEN_INTEREST = 1000
 
 PRIME_WINDOW_1_START = "09:30"
 PRIME_WINDOW_1_END = "11:15"

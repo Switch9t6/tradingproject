@@ -6,7 +6,6 @@ from typing import Dict, Any
 
 from scanner.nse500_scanner import scan_nse500_and_indices
 from scanner.option_mapper import resolve_atm_option_contract
-from execution.upstox_trader import UpstoxOptionsTrader
 from execution.state_manager import StateManager
 from config.settings import INITIAL_WALLET_CAPITAL, TAKE_PROFIT_PCT, STOP_LOSS_PCT
 

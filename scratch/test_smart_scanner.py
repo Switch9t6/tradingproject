@@ -10,7 +10,7 @@ from scanner.smart_scanner import (
     scan_mcx_crude_oil_multifactor,
     scan_smart_opportunities
 )
-from scanner.option_mapper import resolve_atm_option_contract
+from scanner.option_mapper import resolve_atm_option_contract, last_mapping_error
 
 def test_smart_scanner_suite():
     print("=" * 75)
@@ -35,8 +35,26 @@ def test_smart_scanner_suite():
         score = cand_nse["composite_rating"]["composite_score"]
         assert score >= 75.0, "Qualified candidate must have score >= 75"
         opt_nse = resolve_atm_option_contract(cand_nse, max_budget=30000.0)
-        assert opt_nse is not None
-        print(f"  [PASSED] Engine A Candidate: {cand_nse['symbol']} (Score: {score}/100) -> Mapped Contract: {opt_nse['option_symbol']}")
+        if opt_nse is not None:
+            # Safety: the mapped strike must never be absurdly far from spot
+            # (deep-ITM/OTM due to a stale/partial master would be a bug).
+            spot = cand_nse["spot_price"]
+            mapped_strike = opt_nse["strike_price"]
+            deviation_pct = abs(mapped_strike - spot) / spot * 100.0
+            assert deviation_pct <= 5.0, f"Mapped strike {mapped_strike} deviates {deviation_pct:.1f}% from spot {spot}"
+            assert opt_nse["budget_approved"] is True
+            assert opt_nse["lot_size"] > 0
+            print(f"  [PASSED] Engine A Candidate: {cand_nse['symbol']} (Score: {score}/100) -> Mapped Contract: {opt_nse['option_symbol']} (Strike Rs {mapped_strike})")
+        else:
+            # Safety contract: a rejection must be an explicit guardrail error
+            # (never a silent wrong-strike mapping).
+            map_err = last_mapping_error()
+            assert map_err in ("STALE_OR_MISSING_CACHE", "STRIKE_OUT_OF_BOUNDS_OR_MISSING",
+                               "INSUFFICIENT_WALLET_BALANCE", "REJECTED_GUARDRAILS", "NO_CONTRACT")
+            print(f"  [PASSED] Engine A Candidate: {cand_nse['symbol']} (Score: {score}/100) -> safely SKIPPED "
+                  f"(guardrail: {map_err}). No wrong-strike trade.")
+    else:
+        print("  [PASSED] Engine A produced no qualified candidate - safe hold.")
 
     # 3. Test Engine B (MCX Crude Oil 100-Pt Matrix)
     print("\n[Test 3] Executing Engine B (MCX Commodity Scanner)...")

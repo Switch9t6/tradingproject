@@ -395,7 +395,7 @@ def _run_session_attempt(
 
     # ---- Gate 6: budget-approved contract resolution ----
     from scanner.option_mapper import resolve_atm_option_contract, last_mapping_error
-    option_contract = resolve_atm_option_contract(candidate, max_budget=budget_cap)
+    option_contract = resolve_atm_option_contract(candidate, max_budget=budget_cap, access_token=access_token)
     if not option_contract:
         map_err = last_mapping_error() or "NO_CONTRACT"
         score_disp = (candidate.get("composite_rating") or {}).get("composite_score", candidate.get("score", "?"))
@@ -409,6 +409,25 @@ def _run_session_attempt(
                 f"STALE or MISSING, so no valid contract could be resolved.\n"
                 f"<i>This is a data problem - check the Fyers public master URL / server network. "
                 f"Run /status to inspect cache freshness.</i>",
+            )
+        elif map_err == "STRIKE_OUT_OF_BOUNDS_OR_MISSING":
+            print(f"[Session Runner] ATM strike for {candidate.get('symbol')} is MISSING/OUT OF BOUNDS in the "
+                  f"Fyers master (likely stale cache or a new expiry). No trade - never trade a wrong strike.")
+            _send_once(
+                f"CONTRACT_BOUNDS_{session}_{flag_date}",
+                f"🛑 <b>[{session_label} - STRIKE OUT OF BOUNDS]</b>\n"
+                f"Best candidate found (score {score_disp}) but the ATM {candidate.get('option_type')} strike "
+                f"is missing / deviates too far from the master cache (no in-range contract). No trade placed.\n"
+                f"<i>Likely stale symbol master or new expiry rollover.</i>",
+            )
+        elif map_err == "INSUFFICIENT_WALLET_BALANCE":
+            print(f"[Session Runner] Usable wallet budget (after {budget_cap:,.2f} cap) too small for any "
+                  f"affordable {candidate.get('option_type')} strike within the OTM walk. No trade.")
+            _send_once(
+                f"CONTRACT_NONE_{session}_{flag_date}",
+                f"💸 <b>[{session_label}]</b> Best candidate found (score {score_disp}) but the usable "
+                f"wallet budget (max Rs {budget_cap:,.2f}) is insufficient for any {candidate.get('option_type')} "
+                f"strike within the OTM range. No trade placed.",
             )
         elif map_err == "NO_CONTRACT":
             print(f"[Session Runner] No matching contract in Fyers master for the ATM strike. No trade.")

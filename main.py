@@ -268,7 +268,9 @@ def run_mcx_crude_pipeline(
         direction=candidate["direction"],
         budget_cap=budget_cap,
         option_type=candidate.get("option_type"),
-        symbol_hint=candidate.get("symbol", "CRUDEOIL")
+        symbol_hint=candidate.get("symbol", "CRUDEOIL"),
+        momentum_pct=candidate.get("momentum_pct") or 0.0,
+        access_token=access_token
     )
 
     if not option_contract:
@@ -410,7 +412,7 @@ def run_daily_pipeline(
         return
 
     # Option Contract Resolution & Lot Budget Check
-    option_contract = resolve_atm_option_contract(candidate, max_budget=budget_cap)
+    option_contract = resolve_atm_option_contract(candidate, max_budget=budget_cap, access_token=access_token)
     if not option_contract:
         print(f"[Pipeline] Candidate option contract exceeded Rs {budget_cap:,.2f} budget. Pipeline complete.")
         generate_eod_report(dry_run=dry_run)

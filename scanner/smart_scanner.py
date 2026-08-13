@@ -182,7 +182,7 @@ def scan_nse_equities_and_indices(
 
     # 1. First pass: Check for budget-approved candidates
     for cand in qualified_candidates:
-        opt_test = resolve_atm_option_contract(cand, max_budget=available_wallet_cap)
+        opt_test = resolve_atm_option_contract(cand, max_budget=available_wallet_cap, access_token=access_token)
         if opt_test is not None:
             best_candidate = cand
             highest_score = cand["composite_rating"]["composite_score"]
