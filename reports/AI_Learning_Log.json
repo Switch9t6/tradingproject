@@ -1,0 +1,20 @@
+[
+    {
+        "trade_id": 101,
+        "symbol": "NIFTY24AUG23400CE",
+        "net_pnl": -120.0,
+        "exit_reason": "STOP_LOSS_HIT",
+        "error_category": "FALSE_BREAKOUT",
+        "lesson_learned": "Loss caused by low-volume false breakout. Auto-raising minimum volume ratio threshold.",
+        "timestamp": "2026-08-13T16:49:06.336571"
+    },
+    {
+        "trade_id": 101,
+        "symbol": "NIFTY24AUG23400CE",
+        "net_pnl": -120.0,
+        "exit_reason": "STOP_LOSS_HIT",
+        "error_category": "FALSE_BREAKOUT",
+        "lesson_learned": "Loss caused by low-volume false breakout. Auto-raising minimum volume ratio threshold.",
+        "timestamp": "2026-08-13T16:49:12.986661"
+    }
+]

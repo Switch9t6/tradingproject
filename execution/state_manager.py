@@ -307,6 +307,18 @@ class StateManager:
             self.state["current_wallet_balance"] = new_wallet
             
             print(f"[State Manager] Trade #{trade_id} ({mode} / {ex_segment}) CLOSED. Exit Premium: Rs {exit_premium:.2f} | Net PnL: Rs {net_pnl:,.2f} INR | Updated Real-Time Wallet: Rs {new_wallet:,.2f} INR")
+
+            # Trigger AI Self-Learning Engine Post-Mortem Analysis
+            try:
+                from learning.self_learning_engine import analyze_closed_trade
+                analyze_closed_trade({
+                    "id": trade_id,
+                    "net_pnl": net_pnl,
+                    "exit_reason": exit_reason,
+                    "exchange": ex_segment
+                })
+            except Exception as ai_err:
+                print(f"[AI Learning Engine Notice] {ai_err}")
             
         conn.close()
 
