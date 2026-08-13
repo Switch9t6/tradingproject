@@ -359,6 +359,22 @@ def scan_smart_opportunities(
 
     print(f"\n[SMART SCANNER ROUTER] Active Intelligence Session: {active_session}")
 
+    if dry_run:
+        from scanner.yahoo_data_fetcher import scan_yfinance_candidates
+        target_sess = "mcx" if active_session == "MCX_COMMODITY" else "nse"
+        yf_cand = scan_yfinance_candidates(session=target_sess)
+        if yf_cand:
+            return {
+                "symbol": yf_cand["symbol"],
+                "spot_price": yf_cand["spot_price"],
+                "direction": yf_cand["direction"],
+                "option_type": "CE" if yf_cand["direction"] == "BULLISH" else "PE",
+                "session": "MCX Crude Oil Session" if active_session == "MCX_COMMODITY" else "NSE Equity Session",
+                "breakout_reason": f"Yahoo Finance Live Tick Factor Alignment ({yf_cand['score']} Pts)",
+                "composite_rating": {"composite_score": yf_cand["score"]}
+            }
+        return None
+
     if active_session == "NSE_EQUITY":
         candidate = scan_nse_equities_and_indices(access_token=access_token, dry_run=dry_run, top_3_sectors=top_3_sectors, micro_capital=micro_capital)
     elif active_session == "MCX_COMMODITY":

@@ -703,14 +703,50 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
     report_path = os.path.join(REPORTS_DIR, "LIVE_MARKET_REPORT.html")
     file_prefix = "EOD_Report_DRYRUN_" if dry_run else "EOD_Report_LIVE_"
     dated_report_path = os.path.join(REPORTS_DIR, f"{file_prefix}{date_str}.html")
-    
+
+    # Separate NSE / MCX Dry Run Reports
+    nse_dry_path = os.path.join(REPORTS_DIR, "NSE_Dry_Run_Report.html")
+    mcx_dry_path = os.path.join(REPORTS_DIR, "MCX_Dry_Run_Report.html")
+
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html_output)
 
     with open(dated_report_path, "w", encoding="utf-8") as f:
         f.write(html_output)
+
+    if dry_run:
+        nse_trades = [t for t in trades if "NSE" in str(t.get("exchange", "")).upper() or "NIFTY" in str(t.get("option_symbol", "")).upper() or "BANK" in str(t.get("option_symbol", "")).upper()]
+        mcx_trades = [t for t in trades if "MCX" in str(t.get("exchange", "")).upper() or "CRUDE" in str(t.get("option_symbol", "")).upper()]
         
-    print(f"\n[EOD Reporter] HTML dashboard saved to active report files:\n  1. '{report_path}'\n  2. '{dated_report_path}'")
+        # Render NSE Dry Run Report
+        html_nse = template.render(
+            date=date_str, mode_label="NSE DRY-RUN SIMULATION", is_dry_run=True,
+            capital_base=f"{INITIAL_WALLET_CAPITAL:,.2f}", realtime_wallet=f"{realtime_wallet:,.2f}",
+            total_trades=len(nse_trades), winning_trades=sum(1 for t in nse_trades if (t.get("net_pnl") or 0) > 0),
+            win_rate_val=round((sum(1 for t in nse_trades if (t.get("net_pnl") or 0) > 0) / len(nse_trades)) * 100.0, 2) if nse_trades else 0.0,
+            total_friction=f"{sum((t.get('friction_fees') or 0.0) for t in nse_trades):,.2f}",
+            net_pnl=f"{sum((t.get('net_pnl') or 0.0) for t in nse_trades):,.2f}",
+            pnl_pct=round((sum((t.get('net_pnl') or 0.0) for t in nse_trades) / INITIAL_WALLET_CAPITAL) * 100.0, 2),
+            is_positive_pnl=(sum((t.get('net_pnl') or 0.0) for t in nse_trades) >= 0), trades=nse_trades
+        )
+        with open(nse_dry_path, "w", encoding="utf-8") as f:
+            f.write(html_nse)
+
+        # Render MCX Dry Run Report
+        html_mcx = template.render(
+            date=date_str, mode_label="MCX DRY-RUN SIMULATION", is_dry_run=True,
+            capital_base=f"{INITIAL_WALLET_CAPITAL:,.2f}", realtime_wallet=f"{realtime_wallet:,.2f}",
+            total_trades=len(mcx_trades), winning_trades=sum(1 for t in mcx_trades if (t.get("net_pnl") or 0) > 0),
+            win_rate_val=round((sum(1 for t in mcx_trades if (t.get("net_pnl") or 0) > 0) / len(mcx_trades)) * 100.0, 2) if mcx_trades else 0.0,
+            total_friction=f"{sum((t.get('friction_fees') or 0.0) for t in mcx_trades):,.2f}",
+            net_pnl=f"{sum((t.get('net_pnl') or 0.0) for t in mcx_trades):,.2f}",
+            pnl_pct=round((sum((t.get('net_pnl') or 0.0) for t in mcx_trades) / INITIAL_WALLET_CAPITAL) * 100.0, 2),
+            is_positive_pnl=(sum((t.get('net_pnl') or 0.0) for t in mcx_trades) >= 0), trades=mcx_trades
+        )
+        with open(mcx_dry_path, "w", encoding="utf-8") as f:
+            f.write(html_mcx)
+        
+    print(f"\n[EOD Reporter] Reports saved:\n  1. '{report_path}'\n  2. '{dated_report_path}'\n  3. '{nse_dry_path}'\n  4. '{mcx_dry_path}'")
     return report_path
 
 if __name__ == "__main__":

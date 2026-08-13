@@ -29,12 +29,13 @@ FYERS_ACCESS_TOKEN = os.getenv("FYERS_ACCESS_TOKEN", "")
 FYERS_API_BASE_URL = "https://api-t1.fyers.in/api/v3"
 
 # Security & Capital Constraints
-INITIAL_WALLET_CAPITAL = 100000.0          # Upstox Live Wallet Available Cash Base (INR 100,000.00)
+INITIAL_WALLET_CAPITAL = 10000.0          # Base Initial Capital for Dry Run (INR 10,000.00)
+DRY_RUN_INITIAL_WALLET_CAPITAL = 10000.0  # Rs 10,000 INR Capital Base for Dry Run
 MICRO_CAPITAL_BUDGET_CAP = 1000.0          # Budget Cap <= INR 1,000.00 for micro sizing
-# Note: Standard single-lot premium budget is 100% dynamically sized based on actual available wallet balance.
 
-# Strict Daily Guardrails
-MAX_DAILY_TRADES = 1                      # HARD CAP: MAX 1 TRADE PER DAY
+# Strict Guardrails
+MAX_DAILY_TRADES = 1                      # HARD CAP FOR LIVE PRODUCTION: MAX 1 TRADE PER DAY
+DRY_RUN_MAX_TRADES_PER_SESSION = 5        # DRY RUN CAP: MAX 5 TRADES PER SESSION (NSE & MCX)
 TAKE_PROFIT_PCT = 0.25                    # Target: +25% on Option Premium
 STOP_LOSS_PCT = 0.12                      # Base Stop Loss: -12% on Option Premium
 

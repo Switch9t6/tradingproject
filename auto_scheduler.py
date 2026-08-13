@@ -23,19 +23,9 @@ def get_ist_now() -> datetime.datetime:
 
 def run_trading_session(session_name: str):
     now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S IST")
-    print(f"\n[{now_str}] 🚀 AUTO-SCHEDULER LAUNCHING {session_name}...")
+    print(f"\n[{now_str}] 🚀 AUTO-SCHEDULER LAUNCHING {session_name} (DRY RUN MODE)...")
     
-    send_telegram_alert(
-        f"🤖 <b>[AUTO-SCHEDULER ACTIVATED]</b>\n"
-        f"========================================\n"
-        f"Session          : {session_name}\n"
-        f"Execution Time   : {now_str}\n"
-        f"Mode             : LIVE REAL PRODUCTION (UPSTOX API V2)\n"
-        f"========================================\n"
-        f"Scanning market opportunities & executing trades automatically..."
-    )
-    
-    cmd = [sys.executable, "main.py", "--live", "--auto-approve", "--override-daily-limit"]
+    cmd = [sys.executable, "main.py", "--dry-run", "--auto-approve"]
     
     try:
         process = subprocess.Popen(

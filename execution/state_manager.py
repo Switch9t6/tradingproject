@@ -181,11 +181,11 @@ class StateManager:
         except Exception as e:
             print(f"[State Reconcile Notice] {e}")
 
-    def is_trade_allowed_today(self, exchange: str = "NSE_FO", override_daily_limit: bool = False) -> bool:
+    def is_trade_allowed_today(self, exchange: str = "NSE_FO", override_daily_limit: bool = False, dry_run: bool = True) -> bool:
         """
         ENFORCE DYNAMIC SESSION GATES:
-        - Before executing an NSE breakout trade: Verify NSE_FO_trades_today < 1 & not is_nse_locked_today.
-        - Before executing an MCX Crude Oil trade: Verify MCX_FO_trades_today < 1 & not is_mcx_locked_today.
+        - In DRY_RUN mode: Allow up to 5 trades per session (NSE & MCX).
+        - In LIVE mode: Allow 1 trade per session (NSE & MCX).
         """
         self._check_date_reset()
         self.reconcile_state_with_db()
@@ -197,7 +197,9 @@ class StateManager:
             return True
 
         segment = "MCX_FO" if ("MCX" in str(exchange).upper() or "CRUDE" in str(exchange).upper()) else "NSE_FO"
-        
+        from config.settings import DRY_RUN_MAX_TRADES_PER_SESSION, MAX_DAILY_TRADES
+        max_trades = DRY_RUN_MAX_TRADES_PER_SESSION if dry_run else MAX_DAILY_TRADES
+
         if segment == "MCX_FO":
             count = self.state.get("MCX_FO_trades_today", 0)
             locked = self.state.get("is_mcx_locked_today", False)
@@ -207,28 +209,8 @@ class StateManager:
             locked = self.state.get("is_nse_locked_today", False)
             session_name = "NSE Equity (Morning Session)"
 
-        if count >= 1 or locked:
-            print(f"[State Manager] Trade BLOCKED: Max 1 trade cap reached for {session_name} on {self.state['date']}.")
-            
-            # Telegram Alerting for Session Cap Reached
-            cap_alerts = self.state.get("session_cap_alerted", {})
-            if not cap_alerts.get(segment, False):
-                try:
-                    from reporting.telegram_bot import send_telegram_message
-                    alert_msg = (
-                        f"🔒 <b>[SESSION CAP REACHED]</b>\n"
-                        f"========================================\n"
-                        f"Max 1 trade executed for <b>{session_name}</b>.\n"
-                        f"System locked for the rest of the session ({self.state['date']}).\n"
-                        f"========================================"
-                    )
-                    send_telegram_message(alert_msg)
-                    cap_alerts[segment] = True
-                    self.state["session_cap_alerted"] = cap_alerts
-                    self._save_state(self.state)
-                except Exception as alert_err:
-                    print(f"[State Manager Alert Notice] Could not send Telegram cap alert: {alert_err}")
-
+        if count >= max_trades or locked:
+            print(f"[State Manager] Trade BLOCKED: Max {max_trades} trade cap reached for {session_name} on {self.state['date']}.")
             return False
 
         return True
