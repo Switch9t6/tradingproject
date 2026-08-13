@@ -238,6 +238,8 @@ def auto_generate_fyers_token(force: bool = False) -> str:
             return get_active_fyers_token()
 
         session = requests.Session()
+        # Ignore ambient OS/env proxies (they can 402/block the Fyers login API).
+        session.trust_env = False
         headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
 
         # Step 1: Send FY ID (web login app_id "2") -> request_key

@@ -39,7 +39,10 @@ def send_telegram_message(message_text: str) -> bool:
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=10.0)
+        session = requests.Session()
+        # Ignore ambient OS/env proxies (paid tunnels can 402/block Telegram).
+        session.trust_env = False
+        response = session.post(url, json=payload, timeout=10.0)
         if response.status_code == 200:
             _safe_print("[Telegram Alert] Notification sent successfully.")
             return True
