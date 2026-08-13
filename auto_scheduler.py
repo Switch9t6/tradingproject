@@ -18,12 +18,21 @@ from reporting.telegram_bot import send_telegram_message as send_telegram_alert
 
 IST_TZ = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 
+def _safe_print(text: str):
+    try:
+        print(text)
+    except Exception:
+        try:
+            print(text.encode(sys.stdout.encoding or "utf-8", errors="replace").decode(sys.stdout.encoding or "utf-8", errors="replace"))
+        except Exception:
+            pass
+
 def get_ist_now() -> datetime.datetime:
     return datetime.datetime.now(IST_TZ)
 
 def run_trading_session(session_name: str):
     now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S IST")
-    print(f"\n[{now_str}] 🚀 AUTO-SCHEDULER LAUNCHING {session_name} (DRY RUN MODE)...")
+    _safe_print(f"\n[{now_str}] AUTO-SCHEDULER LAUNCHING {session_name} (DRY RUN MODE)...")
     
     cmd = [sys.executable, "main.py", "--dry-run", "--auto-approve"]
     
@@ -39,12 +48,12 @@ def run_trading_session(session_name: str):
         
         for line in iter(process.stdout.readline, ''):
             if line:
-                print(f"[{session_name}] {line.strip()}")
+                _safe_print(f"[{session_name}] {line.strip()}")
                 
         process.wait()
-        print(f"[{session_name}] Session execution complete. Exit Code: {process.returncode}")
+        _safe_print(f"[{session_name}] Session execution complete. Exit Code: {process.returncode}")
     except Exception as ex:
-        print(f"[AUTO-SCHEDULER ERROR] Failed to launch {session_name}: {ex}")
+        _safe_print(f"[AUTO-SCHEDULER ERROR] Failed to launch {session_name}: {ex}")
         send_telegram_alert(f"⚠️ <b>[AUTO-SCHEDULER WARNING]</b>\nError launching {session_name}: {ex}")
 
 def check_token_expiry_prompt():
@@ -66,7 +75,7 @@ def check_token_expiry_prompt():
             need_refresh = True
 
         if need_refresh:
-            print("[Token Expiry Checker] 23-hour token age reached. Initiating Headless TOTP Auto-Login...")
+            _safe_print("[Token Expiry Checker] 23-hour token age reached. Initiating Headless TOTP Auto-Login...")
             new_tok = auto_generate_fyers_token()
             if new_tok and not new_tok.startswith("MOCK") and not new_tok.startswith("your_"):
                 avail = get_live_wallet_balance(new_tok)
@@ -78,18 +87,18 @@ def check_token_expiry_prompt():
                     "========================================\n"
                     "Zero manual intervention required. Automated trading continues seamlessly!"
                 )
-                print(f"[Token Expiry Checker] Token auto-renewed successfully via TOTP.")
+                _safe_print(f"[Token Expiry Checker] Token auto-renewed successfully via TOTP.")
     except Exception as ex:
-        print(f"[Token Expiry Check Error] {ex}")
+        _safe_print(f"[Token Expiry Check Error] {ex}")
 
 def start_automated_daemon():
-    print("=" * 80)
-    print("     24/7 AUTOMATED QUANTITATIVE TRADING DAEMON INITIALIZED (FYERS API V3)     ")
-    print("=" * 80)
-    print("Schedules:")
-    print("  - Session 1 (NSE Equity & Options) : Mon-Fri @ 09:15 AM IST")
-    print("  - Session 2 (MCX Crude Oil Options): Mon-Fri @ 05:00 PM IST")
-    print("Listening for schedule triggers...\n")
+    _safe_print("=" * 80)
+    _safe_print("     24/7 AUTOMATED QUANTITATIVE TRADING DAEMON INITIALIZED (FYERS API V3)     ")
+    _safe_print("=" * 80)
+    _safe_print("Schedules:")
+    _safe_print("  - Session 1 (NSE Equity & Options) : Mon-Fri @ 09:15 AM IST")
+    _safe_print("  - Session 2 (MCX Crude Oil Options): Mon-Fri @ 05:00 PM IST")
+    _safe_print("Listening for schedule triggers...\n")
     
     send_telegram_alert(
         f"🤖 <b>[24/7 AUTOMATION ONLINE]</b>\n"
@@ -124,7 +133,7 @@ def start_automated_daemon():
                     from main import morning_preflight_checks
                     morning_preflight_checks()
                 except Exception as pf_err:
-                    print(f"[Pre-flight Error] {pf_err}")
+                    _safe_print(f"[Pre-flight Error] {pf_err}")
 
             # Session 1: NSE Morning Session (09:15 AM IST)
             nse_key = f"{date_str}_NSE"
