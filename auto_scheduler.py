@@ -1,22 +1,40 @@
 """
-Automated 24/7 Multi-Session Schedule Manager (Upstox API v2)
-=============================================================
-Continuously monitors local time (IST) and automatically launches:
-1. Session 1: NSE Equity & Index Options Engine at 09:15 AM IST (Mon-Fri)
-2. Session 2: MCX Crude Oil Options Engine at 05:00 PM IST (Mon-Fri)
+Automated 24/7 Multi-Session Scheduler (Fyers API v3)
+======================================================
+Runs as the single long-lived cloud process (Railway worker). It:
 
-Runs seamlessly in background with Telegram status notifications & auto-retry logic.
+  * Starts the Telegram command listener & web report server at boot.
+  * Auto-refreshes the Fyers access token before expiry (23h TOTP renew).
+  * Triggers ONE stage-gated session per day per market:
+      - Session 1: NSE Morning Session @ 09:15 IST (window 09:15 - 15:30)
+      - Session 2: MCX Evening Session @ 17:00 IST (window 17:00 - 23:15)
+  * Delegates the actual scan/preview/execution to session_runner.run_session_once(),
+    which guarantees the engine never re-fires or spams Telegram. Manual
+    /start and /resume commands (via the Telegram listener) force a fresh run.
+
+Modes:
+  --live       : real Fyers order placement (default for Railway)
+  --dry-run    : full simulation, no real orders
+  IS_DRY_RUN env overrides both flags (truthy = dry run).
 """
 
 import os
 import sys
 import time
+import argparse
+import threading
 import datetime
-import subprocess
 
-from reporting.telegram_bot import send_telegram_message as send_telegram_alert
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-IST_TZ = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+from config.settings import (
+    MORNING_SCAN_TIME,
+    EVENING_SCAN_TIME,
+    MORNING_SESSION_WINDOW,
+    EVENING_SESSION_WINDOW,
+)
+from session_runner import run_session_once, get_ist_now, SchedulerState, SESSION_LABELS
+
 
 def _safe_print(text: str):
     try:
@@ -27,59 +45,45 @@ def _safe_print(text: str):
         except Exception:
             pass
 
-def get_ist_now() -> datetime.datetime:
-    return datetime.datetime.now(IST_TZ)
 
-def run_trading_session(session_name: str):
-    now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S IST")
-    _safe_print(f"\n[{now_str}] AUTO-SCHEDULER LAUNCHING {session_name} (DRY RUN MODE)...")
-    
-    cmd = [sys.executable, "main.py", "--dry-run", "--auto-approve"]
-    
-    try:
-        process = subprocess.Popen(
-            cmd,
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
-        )
-        
-        for line in iter(process.stdout.readline, ''):
-            if line:
-                _safe_print(f"[{session_name}] {line.strip()}")
-                
-        process.wait()
-        _safe_print(f"[{session_name}] Session execution complete. Exit Code: {process.returncode}")
-    except Exception as ex:
-        _safe_print(f"[AUTO-SCHEDULER ERROR] Failed to launch {session_name}: {ex}")
-        send_telegram_alert(f"⚠️ <b>[AUTO-SCHEDULER WARNING]</b>\nError launching {session_name}: {ex}")
+def resolve_is_dry_run(args) -> bool:
+    """IS_DRY_RUN env overrides CLI flags; otherwise --dry-run or (not --live)."""
+    env_dry = os.getenv("IS_DRY_RUN", "").strip().lower()
+    if env_dry in ["false", "0", "no"]:
+        return False
+    if env_dry in ["true", "1", "yes"]:
+        return True
+    return args.dry_run or not args.live
+
 
 def check_token_expiry_prompt():
-    """Checks token age and programmatically generates a fresh token via TOTP at 23-hour mark."""
+    """Refreshes the Fyers access token via headless TOTP at the 23-hour mark."""
     try:
-        from config.settings import TOKEN_FILE_PATH
+        from config.settings import FYERS_TOKEN_FILE_PATH
         import json
         from execution.fyers_trader import auto_generate_fyers_token, get_live_wallet_balance
-        
-        need_refresh = False
-        if os.path.exists(TOKEN_FILE_PATH):
-            with open(TOKEN_FILE_PATH, "r") as f:
-                tdata = json.load(f)
-                saved_ts = float(tdata.get("saved_timestamp") or 0.0)
+
+        need_refresh = True
+        if os.path.exists(FYERS_TOKEN_FILE_PATH):
+            try:
+                with open(FYERS_TOKEN_FILE_PATH, "r") as f:
+                    tdata = json.load(f)
+                saved_ts = float(tdata.get("saved_timestamp") or tdata.get("saved_at") or 0.0)
                 age_hours = (time.time() - saved_ts) / 3600.0 if saved_ts > 0 else 999.0
-                if age_hours >= 23.0:
-                    need_refresh = True
-        else:
-            need_refresh = True
+                need_refresh = age_hours >= 23.0
+            except Exception:
+                need_refresh = True
 
         if need_refresh:
             _safe_print("[Token Expiry Checker] 23-hour token age reached. Initiating Headless TOTP Auto-Login...")
             new_tok = auto_generate_fyers_token()
             if new_tok and not new_tok.startswith("MOCK") and not new_tok.startswith("your_"):
-                avail = get_live_wallet_balance(new_tok)
-                send_telegram_alert(
+                try:
+                    avail = get_live_wallet_balance(new_tok)
+                except Exception:
+                    avail = 0.0
+                from reporting.telegram_bot import send_telegram_message
+                send_telegram_message(
                     "✅ <b>[FYERS TOKEN AUTO-RENEWED]</b>\n"
                     "========================================\n"
                     "Fresh 24-hour Access Token generated via Headless TOTP Auto-Login!\n"
@@ -87,67 +91,127 @@ def check_token_expiry_prompt():
                     "========================================\n"
                     "Zero manual intervention required. Automated trading continues seamlessly!"
                 )
-                _safe_print(f"[Token Expiry Checker] Token auto-renewed successfully via TOTP.")
+                _safe_print("[Token Expiry Checker] Token auto-renewed successfully via TOTP.")
     except Exception as ex:
         _safe_print(f"[Token Expiry Check Error] {ex}")
 
-def start_automated_daemon():
-    _safe_print("=" * 80)
-    _safe_print("     24/7 AUTOMATED QUANTITATIVE TRADING DAEMON INITIALIZED (FYERS API V3)     ")
-    _safe_print("=" * 80)
-    _safe_print("Schedules:")
-    _safe_print("  - Session 1 (NSE Equity & Options) : Mon-Fri @ 09:15 AM IST")
-    _safe_print("  - Session 2 (MCX Crude Oil Options): Mon-Fri @ 05:00 PM IST")
-    _safe_print("Listening for schedule triggers...\n")
-    
-    send_telegram_alert(
-        f"🤖 <b>[24/7 AUTOMATION ONLINE]</b>\n"
-        f"========================================\n"
-        f"Broker Gateway   : Fyers API v3\n"
-        f"System Status    : FULLY AUTOMATED & STANDING BY\n"
-        f"Session 1 Schedule: Mon-Fri @ 09:15 AM IST (NSE)\n"
-        f"Session 2 Schedule: Mon-Fri @ 05:00 PM IST (MCX)\n"
-        f"========================================\n"
-        f"No manual intervention required. Trades will execute automatically!"
-    )
-    
-    executed_today = set()
-    last_token_check = 0.0
 
+def _token_refresher_loop():
+    """Background loop: checks token age every 30 minutes (23h auto-renew)."""
     while True:
-        now = get_ist_now()
-        date_str = now.strftime("%Y-%m-%d")
-        time_str = now.strftime("%H:%M")
-        weekday = now.weekday() # 0 = Mon ... 4 = Fri, 5/6 = Sat/Sun
-        
-        # Reset daily execution flags at midnight IST
-        if time_str == "00:00":
-            executed_today.clear()
-            
-        if weekday < 5:  # Monday to Friday
-            # Pre-flight Boot (08:50 AM IST)
-            preflight_key = f"{date_str}_PREFLIGHT"
-            if time_str == "08:50" and preflight_key not in executed_today:
-                executed_today.add(preflight_key)
-                try:
-                    from main import morning_preflight_checks
-                    morning_preflight_checks()
-                except Exception as pf_err:
-                    _safe_print(f"[Pre-flight Error] {pf_err}")
+        try:
+            check_token_expiry_prompt()
+        except Exception as ex:
+            _safe_print(f"[Token Refresher Error] {ex}")
+        time.sleep(1800)
 
-            # Session 1: NSE Morning Session (09:15 AM IST)
-            nse_key = f"{date_str}_NSE"
-            if time_str == "09:15" and nse_key not in executed_today:
-                executed_today.add(nse_key)
-                run_trading_session("NSE Equity & Index Options (Session 1)")
-                
-            # Session 2: MCX Evening Session (05:00 PM IST)
-            mcx_key = f"{date_str}_MCX"
-            if time_str == "17:00" and mcx_key not in executed_today:
-                executed_today.add(mcx_key)
-                run_trading_session("MCX Crude Oil Options (Session 2)")
 
-        time.sleep(15)  # Check every 15 seconds
+def _within_window(time_str: str, start: str, end: str) -> bool:
+    return start <= time_str <= end
+
+
+def _fire_session(state: SchedulerState, session: str, date_str: str, dry_run: bool):
+    """Runs one stage-gated session if not already done today."""
+    if state.is_session_done(session, date_str):
+        return
+    now_str = get_ist_now().strftime("%H:%M")
+    _safe_print(f"\n[{now_str} IST] [AUTO-SCHEDULER] Triggering {SESSION_LABELS[session]} scan...")
+    result = run_session_once(
+        session=session,
+        dry_run=dry_run,
+        auto_approve=True,   # automated runs: no interactive confirmation
+        override=False,      # once-per-session-per-day gate active
+        micro_capital=True,  # spend the single best opportunity within budget cap
+        trigger_source="auto_scheduler",
+    )
+    state.load()  # reload persisted state after the run
+    _safe_print(f"[AUTO-SCHEDULER] {SESSION_LABELS[session]} -> {result.get('status')}: {result.get('message')}")
+
+
+def start_automated_daemon(dry_run: bool = True):
+    mode_tag = "DRY RUN (Simulation)" if dry_run else "LIVE (Fyers API v3)"
+    _safe_print("=" * 80)
+    _safe_print("     24/7 AUTOMATED QUANTITATIVE TRADING DAEMON INITIALIZED     ")
+    _safe_print("=" * 80)
+    _safe_print(f"Mode       : {mode_tag}")
+    _safe_print("Schedules  :")
+    _safe_print(f"  - Session 1 (NSE Equity & Options) : Mon-Fri @ {MORNING_SCAN_TIME} IST")
+    _safe_print(f"  - Session 2 (MCX Crude Oil Options): Mon-Fri @ {EVENING_SCAN_TIME} IST")
+    _safe_print("Once-per-session gating active. Manual /start & /resume force a fresh run.\n")
+
+    # 1. Start Telegram command listener + web report server (non-blocking)
+    try:
+        from execution.telegram_control import start_telegram_listener_background
+        start_telegram_listener_background()
+    except Exception as e:
+        _safe_print(f"[Telegram Listener Error] {e}")
+    try:
+        from web.server import start_web_server_background
+        start_web_server_background()
+    except Exception as e:
+        _safe_print(f"[Web Server Error] {e}")
+
+    # 2. Startup notification (single message)
+    try:
+        from reporting.telegram_bot import send_telegram_message
+        send_telegram_message(
+            f"🤖 <b>[24/7 AUTOMATION ONLINE]</b>\n"
+            f"========================================\n"
+            f"Broker Gateway    : Fyers API v3\n"
+            f"Mode              : {mode_tag}\n"
+            f"System Status     : FULLY AUTOMATED & STANDING BY\n"
+            f"Session 1 Schedule: Mon-Fri @ {MORNING_SCAN_TIME} IST (NSE)\n"
+            f"Session 2 Schedule: Mon-Fri @ {EVENING_SCAN_TIME} IST (MCX)\n"
+            f"========================================\n"
+            f"No manual intervention required. Trades will execute automatically!"
+        )
+    except Exception as e:
+        _safe_print(f"[Startup Telegram Notice] {e}")
+
+    # 3. Background token auto-refresh (23h TOTP renew)
+    threading.Thread(target=_token_refresher_loop, daemon=True).start()
+
+    # 4. Main trigger loop (30s poll, once-per-session gate)
+    state = SchedulerState()
+    state.load()
+    daily_actions_done = set()  # in-memory: square-off/EOD fire once per day
+    while True:
+        try:
+            now = get_ist_now()
+            date_str = now.strftime("%Y-%m-%d")
+            time_str = now.strftime("%H:%M")
+
+            if now.weekday() < 5:  # Mon-Fri only
+                if _within_window(time_str, MORNING_SCAN_TIME, MORNING_SESSION_WINDOW[1]):
+                    _fire_session(state, "nse", date_str, dry_run)
+                if _within_window(time_str, EVENING_SCAN_TIME, EVENING_SESSION_WINDOW[1]):
+                    _fire_session(state, "mcx", date_str, dry_run)
+
+                # Hard EOD square-off enforcement (once per day each)
+                if time_str == "15:15" and f"{date_str}_SO1" not in daily_actions_done:
+                    daily_actions_done.add(f"{date_str}_SO1")
+                    try:
+                        from main import execute_hard_eod_squareoff
+                        execute_hard_eod_squareoff(session_tag="1515", dry_run=dry_run)
+                    except Exception as so_err:
+                        _safe_print(f"[Square-Off Error (NSE)] {so_err}")
+                if time_str == "23:00" and f"{date_str}_SO2" not in daily_actions_done:
+                    daily_actions_done.add(f"{date_str}_SO2")
+                    try:
+                        from main import execute_hard_eod_squareoff
+                        execute_hard_eod_squareoff(session_tag="2300", dry_run=dry_run)
+                    except Exception as so_err:
+                        _safe_print(f"[Square-Off Error (MCX)] {so_err}")
+
+            time.sleep(30)
+        except Exception as loop_err:
+            _safe_print(f"[DAEMON LOOP ERROR] {loop_err}")
+            time.sleep(30)
+
 
 if __name__ == "__main__":
-    start_automated_daemon()
+    parser = argparse.ArgumentParser(description="24/7 automated dual-session scheduler (Fyers API v3)")
+    parser.add_argument("--live", action="store_true", help="Real Fyers order placement mode")
+    parser.add_argument("--dry-run", action="store_true", help="Full simulation mode (no real orders)")
+    args = parser.parse_args()
+    start_automated_daemon(dry_run=resolve_is_dry_run(args))

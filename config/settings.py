@@ -163,6 +163,12 @@ MCX_PRIME_WINDOW_START = "17:00"
 MCX_PRIME_WINDOW_END = "23:00"
 MCX_SQUARE_OFF_SCHEDULE_TIME = "23:00"        # 11:00 PM IST MCX Hard EOD Square-Off
 
+# Scheduler Trigger Times & Windows (IST) - auto_scheduler.py + session_runner.py
+MORNING_SCAN_TIME = "09:15"                   # Session 1: NSE Morning Session scan trigger
+EVENING_SCAN_TIME = "17:00"                   # Session 2: MCX Evening Session scan trigger
+MORNING_SESSION_WINDOW = ("09:15", "15:30")   # Session 1: NSE window (matches NSE_SESSION_END)
+EVENING_SESSION_WINDOW = ("17:00", "23:15")   # Session 2: MCX window (matches MCX_SESSION_END)
+
 # Commodity News & EIA Inventory Blackout Settings
 EIA_BLACKOUT_WINDOW_MINUTES = 15              # Block trading 15 mins before & after 08:00 PM IST Wednesdays
 EIA_INVENTORY_DAY_OF_WEEK = 2                 # 2 = Wednesday (0 = Monday)

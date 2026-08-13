@@ -1,1 +1,1 @@
-worker: python main.py --live --daemon --auto-approve
+worker: python auto_scheduler.py --live

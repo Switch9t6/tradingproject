@@ -10,8 +10,8 @@ Market Hours Enforcement (09:15 AM to 03:15 PM IST):
 - When market is CLOSED (outside Mon-Fri 09:15 AM - 03:15 PM IST):
   - /start, /help, /stop, /resume return: "market is closed try during 9:15 AM to 3:15 PM"
   - /status, /report, /reports, /trades remain ACTIVE to view live stats and reports.
-- When market is OPEN (Mon-Fri 09:15 AM - 03:15 PM IST):
-  - /start executes: python main.py --live in background thread.
+- When market is OPEN (Mon-Fri 09:15 AM - 03:15 PM IST / 17:00 - 23:15 IST):
+  - /start executes a stage-gated session run (scan -> preview -> execute) in-process.
 """
 
 import os
@@ -21,7 +21,6 @@ import time
 import uuid
 import threading
 import datetime
-import subprocess
 
 from typing import Dict, Any, List, Optional
 
@@ -341,29 +340,29 @@ def _register_handlers(bot):
         _send_or_reply(
             bot,
             message,
-            "🚀 [EXECUTING ENGINE] Launching trading pipeline ('python main.py --live')...\n\n"
+            "🚀 [EXECUTING ENGINE] Launching stage-gated session run...\n\n"
             "System scanning active dual-session markets & quantitative matrix.",
             reply_markup=_build_action_keyboard(telebot)
         )
 
         def _run_pipeline_job():
             try:
-                cmd = [sys.executable, "main.py", "--live", "--auto-approve", "--override-daily-limit"]
-                _safe_print(f"[Telegram Control] Executing command via /start: {' '.join(cmd)}")
-                env = os.environ.copy()
-                env["TELEGRAM_LISTENER_DISABLED"] = "1"
-                env["IS_DRY_RUN"] = "False"
-                proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                out, _ = proc.communicate(timeout=180)
-                _safe_print(f"[Telegram Control Output]\n{out[-500:] if out else 'No output'}")
-                if out and ("LIVE LIMIT ORDER PLACED" in out or "CLOSED" in out or "EXECUTED" in out or "TARGET HIT" in out):
-                    bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[PIPELINE EXECUTED SUCCESSFULLY]</b>\n\n<pre>{out[-600:]}</pre>", parse_mode="HTML")
-                elif out and "UDAPI" in out:
-                    bot.send_message(TELEGRAM_CHAT_ID, "⚠️ <b>[UPSTOX API NOTICE]</b>\nUpstox API v2 endpoint response notice. Please verify token status on Telegram.", parse_mode="HTML")
-                elif out and "Session lock" in out:
-                    bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[SESSION LOCK]</b> Session trade cap reached for today.", parse_mode="HTML")
+                from session_runner import run_session_once
+                _safe_print("[Telegram Control] Running stage-gated session via /start (manual override, preview + confirmation required).")
+                result = run_session_once(
+                    session="auto",
+                    dry_run=False,
+                    auto_approve=False,
+                    override=True,
+                    micro_capital=True,
+                    trigger_source="telegram /start",
+                )
+                status = result.get("status")
+                msg = result.get("message", "")
+                if status == "no_session":
+                    bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[NO ACTIVE SESSION]</b> Market is closed. Sessions: NSE 09:15-15:30 IST & MCX 17:00-23:15 IST.", parse_mode="HTML")
                 else:
-                    bot.send_message(TELEGRAM_CHAT_ID, f"ℹ️ <b>[PIPELINE SUMMARY]</b>\n<pre>{out[-400:] if out else 'Scan finished'}</pre>", parse_mode="HTML")
+                    bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[SESSION RUN FINISHED]</b>\n<pre>Status: {status}\n{msg}</pre>", parse_mode="HTML")
             except Exception as ex:
                 _safe_print(f"[Telegram Control Run Error] {ex}")
 
@@ -377,7 +376,7 @@ def _register_handlers(bot):
             "[UPSTOX LIVE ALGORITHMIC ENGINE]\n"
             "-------------------------------------------\n"
             "Available Commands:\n"
-            "/start   - Launch live trading pipeline ('python main.py --live --auto-approve')\n"
+            "/start   - Launch live stage-gated session run (scan + preview + execute)\n"
             "/status  - Live Upstox Wallet Balance & Bot Health\n"
             "/report  - Download today's Live EOD HTML report\n"
             "/trades  - View today's executed trade log\n"
@@ -466,26 +465,22 @@ def _register_handlers(bot):
 
         def _run_resume_job():
             try:
-                cmd = [sys.executable, "main.py", "--live", "--auto-approve", "--override-daily-limit"]
-                _safe_print(f"[Telegram Control] Executing pipeline scan via /resume: {' '.join(cmd)}")
-                env = os.environ.copy()
-                env["TELEGRAM_LISTENER_DISABLED"] = "1"
-                env["IS_DRY_RUN"] = "False"
-                proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                out, _ = proc.communicate(timeout=180)
-                if out and "EXECUTING AGGRESSIVE LIMIT ORDER (FYERS" in out and "REJECTED" not in out:
-                    bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[ORDER PLACED ON FYERS]</b>\n\n<pre>{out[-600:]}</pre>", parse_mode="HTML")
-                elif out and "REJECTED" in out:
-                    bot.send_message(TELEGRAM_CHAT_ID,
-                        "❌ <b>[FYERS API - ORDER REJECTED]</b>\n"
-                        "========================================\n"
-                        "Fyers rejected the order.\n"
-                        "Action Required: Verify Fyers credentials in .env.",
-                        parse_mode="HTML")
-                elif out and ("Session lock" in out or "cap reached" in out):
-                    bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[SESSION LOCK]</b> Session trade cap reached for today.", parse_mode="HTML")
+                from session_runner import run_session_once
+                _safe_print("[Telegram Control] Running stage-gated session via /resume (manual override, preview + confirmation required).")
+                result = run_session_once(
+                    session="auto",
+                    dry_run=False,
+                    auto_approve=False,
+                    override=True,
+                    micro_capital=True,
+                    trigger_source="telegram /resume",
+                )
+                status = result.get("status")
+                msg = result.get("message", "")
+                if status == "no_session":
+                    bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[NO ACTIVE SESSION]</b> Market is closed. Sessions: NSE 09:15-15:30 IST & MCX 17:00-23:15 IST.", parse_mode="HTML")
                 else:
-                    bot.send_message(TELEGRAM_CHAT_ID, f"ℹ️ <b>[PIPELINE SUMMARY]</b>\n<pre>{out[-400:] if out else 'Scan finished'}</pre>", parse_mode="HTML")
+                    bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[SESSION RUN FINISHED]</b>\n<pre>Status: {status}\n{msg}</pre>", parse_mode="HTML")
             except Exception as ex:
                 _safe_print(f"[Telegram Control Run Error] {ex}")
 

@@ -508,14 +508,20 @@ if __name__ == "__main__":
     if is_cloud_env:
         print("\n" + "=" * 80)
         print("  [CLOUD DAEMON DUAL-SESSION ACTIVE] Engine running 24/7 continuous market scanner on Railway.")
-        print("  [SESSION 1 (NSE EQUITY)] Auto-scans 09:30-11:15 AM & 13:30-14:30 PM IST | Square-off: 15:15 IST.")
-        print("  [SESSION 2 (MCX COMMODITY)] Auto-scans 17:00-23:00 PM IST | Square-off: 23:00 IST.")
+        print("  [SESSION 1 (NSE EQUITY)] Auto-scan @ 09:15 IST | Square-off: 15:15 IST.")
+        print("  [SESSION 2 (MCX COMMODITY)] Auto-scan @ 17:00 IST | Square-off: 23:00 IST.")
+        print("  [ONCE-PER-SESSION GATE ACTIVE] The engine scans/executes only ONCE per session per day.")
         print("=" * 80 + "\n")
-        
+
+        from session_runner import run_session_once, SchedulerState
+        sched_state = SchedulerState()
+        sched_state.load()
+
         while True:
             try:
                 time.sleep(300) # Scan loop interval: 5 minutes
                 now_ist = get_ist_now()
+                date_str = now_ist.strftime("%Y-%m-%d")
                 c_time = now_ist.time()
                 is_weekday = now_ist.weekday() < 5
                 
@@ -524,22 +530,26 @@ if __name__ == "__main__":
                     if datetime.time(8, 50) <= c_time <= datetime.time(8, 55):
                         morning_preflight_checks(dry_run=is_dry_run)
 
-                    # Session 1: NSE Options Window
-                    if (datetime.time(9, 30) <= c_time <= datetime.time(11, 15)) or (datetime.time(13, 30) <= c_time <= datetime.time(14, 30)):
+                    # Session 1: NSE Options Window (once-per-session gate prevents repeat scans)
+                    if (datetime.time(9, 15) <= c_time <= datetime.time(15, 30)) and not sched_state.is_session_done("nse", date_str):
                         print(f"[{c_time.strftime('%H:%M:%S')} IST] [DAEMON] Triggering Session 1 NSE Market Scan...")
-                        run_daily_pipeline(session="nse", auto_approve=True, micro_capital=args.micro_capital, dry_run=is_dry_run)
-                        
+                        run_session_once(session="nse", dry_run=is_dry_run, auto_approve=True,
+                                         override=False, micro_capital=True, trigger_source="main daemon")
+                        sched_state.load()
+
                     # Session 1 Hard Square-Off
-                    elif datetime.time(15, 15) <= c_time <= datetime.time(15, 20):
+                    if datetime.time(15, 15) <= c_time <= datetime.time(15, 20):
                         execute_hard_eod_squareoff(session_tag="1515", dry_run=is_dry_run)
 
-                    # Session 2: MCX Crude Oil Options Window
-                    if datetime.time(17, 0) <= c_time <= datetime.time(23, 0):
+                    # Session 2: MCX Crude Oil Options Window (once-per-session gate prevents repeat scans)
+                    if (datetime.time(17, 0) <= c_time <= datetime.time(23, 0)) and not sched_state.is_session_done("mcx", date_str):
                         print(f"[{c_time.strftime('%H:%M:%S')} IST] [DAEMON] Triggering Session 2 MCX Crude Oil Market Scan...")
-                        run_daily_pipeline(session="mcx", auto_approve=True, micro_capital=args.micro_capital, dry_run=is_dry_run)
+                        run_session_once(session="mcx", dry_run=is_dry_run, auto_approve=True,
+                                         override=False, micro_capital=True, trigger_source="main daemon")
+                        sched_state.load()
 
                     # Session 2 Hard Square-Off
-                    elif datetime.time(23, 0) <= c_time <= datetime.time(23, 10):
+                    if datetime.time(23, 0) <= c_time <= datetime.time(23, 10):
                         execute_hard_eod_squareoff(session_tag="2300", dry_run=is_dry_run)
 
             except Exception as daemon_err:
