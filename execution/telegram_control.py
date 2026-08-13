@@ -31,7 +31,10 @@ load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-BOT_DISABLED_FLAG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "BOT_DISABLED.flag")
+try:
+    from config.settings import BOT_DISABLED_FLAG
+except Exception:
+    BOT_DISABLED_FLAG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "BOT_DISABLED.flag")
 
 # Module-level bot instance
 _bot = None
@@ -315,6 +318,20 @@ def _register_handlers(bot):
     """Register all Telegram command handlers and inline button callbacks on the bot instance."""
     import telebot
 
+    def _broker_executed_status_text(broker_state) -> str:
+        """Status reply shown when a trade is already executed today."""
+        details = "\n".join(f"• {d}" for d in broker_state.get("details", []))
+        return (
+            "🚫 <b>[TRADE ALREADY EXECUTED TODAY]</b>\n"
+            "========================================\n"
+            f"<b>Reason :</b> {broker_state.get('reason')}\n"
+            f"<b>Broker :</b>\n{details}\n"
+            "========================================\n"
+            "A trade has already been executed today, so the 1-trade/day cap is consumed. "
+            "No new order will be placed.\n"
+            "Send <b>/status</b> for the full position & health report."
+        )
+
     @bot.message_handler(commands=["help"])
     def cmd_help(message):
         help_msg = (
@@ -335,6 +352,13 @@ def _register_handlers(bot):
     def cmd_start(message):
         if not check_is_market_open():
             _send_or_reply(bot, message, "Market is closed. Active trading sessions: Session 1 NSE (09:00 - 15:30 IST) & Session 2 MCX (17:00 - 23:15 IST).", reply_markup=_build_action_keyboard(telebot))
+            return
+
+        from execution.fyers_trader import check_broker_trade_executed_today
+        broker_state = check_broker_trade_executed_today()
+        if broker_state.get("blocked"):
+            _send_or_reply(bot, message, _broker_executed_status_text(broker_state), reply_markup=_build_action_keyboard(telebot))
+            _safe_print("[Telegram Control] /start blocked: trade already executed today (broker-side check).")
             return
 
         _send_or_reply(
@@ -408,6 +432,13 @@ def _register_handlers(bot):
     def cmd_resume(message):
         if not check_is_market_open():
             bot.reply_to(message, "Market is closed. Active trading sessions: Session 1 NSE (09:00 - 15:30 IST) & Session 2 MCX (17:00 - 23:15 IST).", reply_markup=_build_action_keyboard(telebot))
+            return
+
+        from execution.fyers_trader import check_broker_trade_executed_today
+        broker_state = check_broker_trade_executed_today()
+        if broker_state.get("blocked"):
+            bot.reply_to(message, _broker_executed_status_text(broker_state), reply_markup=_build_action_keyboard(telebot))
+            _safe_print("[Telegram Control] /resume blocked: trade already executed today (broker-side check).")
             return
 
         from execution.fyers_trader import check_fyers_credentials_configured, verify_and_fetch_live_fyers_balance

@@ -285,6 +285,43 @@ def _run_session_attempt(
     sm = StateManager()
     sm.reconcile_state_with_db()
 
+    # ---- Gate 0.5a: broker-side "trade already executed today" guard (LIVE only) ----
+    # Broker ground truth (positions + tradebook) survives Railway redeploys, unlike
+    # state.json / scheduler_state.json which live on the ephemeral container disk.
+    if not dry_run:
+        from execution.fyers_trader import check_broker_trade_executed_today, segment_disabled_today
+
+        if segment_disabled_today(exchange):
+            _send_once(
+                f"SEGDIS_{session}_{flag_date}",
+                f"🚫 <b>[{session_label}]</b> Segment <b>{exchange}</b> is marked disabled on your broker "
+                f"(segment activation issue detected earlier). Skipping today. "
+                f"Enable the segment on your broker and it will be re-evaluated tomorrow.",
+            )
+            state.mark_session_done(session, flag_date)
+            return {"status": "segment_disabled", "message": f"{exchange} disabled on broker"}
+
+        broker_state = check_broker_trade_executed_today()
+        if broker_state.get("blocked"):
+            details = "\n".join(f"• {d}" for d in broker_state.get("details", []))
+            _send_once(
+                f"ALREADY_EXEC_{session}_{flag_date}",
+                "🚫 <b>[TRADE ALREADY EXECUTED TODAY - NEW ENTRIES BLOCKED]</b>\n"
+                "========================================\n"
+                f"<b>Segment   :</b> {exchange}\n"
+                f"<b>Reason    :</b> {broker_state.get('reason')}\n"
+                f"<b>Broker    :</b>\n{details}\n"
+                "========================================\n"
+                "The 1-trade/day cap is already consumed. No new order will be placed.\n"
+                "Send <b>/status</b> to view the current position & health.",
+            )
+            state.mark_session_done(session, flag_date)
+            return {
+                "status": "already_executed",
+                "message": broker_state.get("reason"),
+                "broker_state": broker_state,
+            }
+
     # ---- Gate 1: market hours / news / cap / wallet ----
     gate_error = _gates_before_scan(session, sm, dry_run=dry_run, override=override, flag_date=flag_date)
     if gate_error:

@@ -19,6 +19,12 @@ logs/fyers_*.csv.gz
 logs/fyers_access_token.json
 logs/fyersApi.log
 logs/fyersRequests.log
+/fyersApi.log
+/fyersRequests.log
+
+# Runtime scheduler guard state (persists under /data on Railway)
+logs/scheduler_state.json
+logs/halt_alert_sent.flag
 
 # Byte-compiled / Python caches
 __pycache__/

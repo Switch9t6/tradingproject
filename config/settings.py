@@ -193,3 +193,7 @@ TOKEN_FILE_PATH = os.path.join(PERSISTENT_BASE_DIR, "access_token.json")
 FYERS_TOKEN_FILE_PATH = os.path.join(PERSISTENT_BASE_DIR, "fyers_access_token.json")
 STATE_FILE_PATH = os.path.join(PERSISTENT_BASE_DIR, "state.json")
 DB_FILE_PATH = os.path.join(LOGS_DIR, "trades.db")
+
+# Kill-switch + segment-disable markers (persist across redeploys when /data volume is mounted)
+BOT_DISABLED_FLAG = os.path.join(PERSISTENT_BASE_DIR, "BOT_DISABLED.flag")
+SEGMENT_DISABLED_FLAG_PATTERN = os.path.join(PERSISTENT_BASE_DIR, "segment_disabled_{segment}.flag")

@@ -77,7 +77,8 @@ class StateManager:
             },
             "active_trade_id": None,
             "active_position": None,
-            "current_wallet_balance": INITIAL_WALLET_CAPITAL
+            "current_wallet_balance": INITIAL_WALLET_CAPITAL,
+            "disabled_segments": {}
         }
 
     def reset_daily_state(self) -> Dict[str, Any]:
@@ -106,6 +107,7 @@ class StateManager:
                         state["session_cap_alerted"] = {"NSE_FO": False, "MCX_FO": False}
                         state["active_trade_id"] = None
                         state["active_position"] = None
+                        state["disabled_segments"] = {}
                         if "current_wallet_balance" not in state:
                             state["current_wallet_balance"] = INITIAL_WALLET_CAPITAL
                         self._save_state(state)
@@ -400,4 +402,5 @@ class StateManager:
             self.state["session_cap_alerted"] = {"NSE_FO": False, "MCX_FO": False}
             self.state["active_trade_id"] = None
             self.state["active_position"] = None
+            self.state["disabled_segments"] = {}
             self._save_state(self.state)

@@ -30,7 +30,8 @@ from config.settings import (
     NSE_SESSION_END,
     MCX_SESSION_START,
     MCX_SESSION_END,
-    MCX_SQUARE_OFF_SCHEDULE_TIME
+    MCX_SQUARE_OFF_SCHEDULE_TIME,
+    BASE_DIR
 )
 
 IST_TZ = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
@@ -66,13 +67,14 @@ def security_audit_check():
 
 def _halt_engine_and_alert_telegram(reason: str):
     """Halts the trading engine for the day and sends an urgent Telegram warning ONCE."""
-    halt_flag = "logs/bot_disabled.flag"
     halt_alert_flag = "logs/halt_alert_sent.flag"
 
     try:
-        os.makedirs("logs", exist_ok=True)
-        with open(halt_flag, "w") as f:
-            f.write(f"PAUSED: {reason}")
+        from config.settings import BOT_DISABLED_FLAG
+        for flag in (BOT_DISABLED_FLAG, os.path.join(BASE_DIR, "logs", "bot_disabled.flag")):
+            os.makedirs(os.path.dirname(flag), exist_ok=True)
+            with open(flag, "w") as f:
+                f.write(f"PAUSED: {reason}")
     except Exception:
         pass
 

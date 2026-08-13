@@ -4,6 +4,7 @@ import time
 import json
 import pyotp
 import requests
+import threading
 import datetime
 from typing import Dict, Any, Optional
 
@@ -26,6 +27,155 @@ from config.settings import (
 )
 
 _last_totp_attempt_time = 0.0
+
+IST_TZ = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+
+_broker_check_cache = {"ts": 0.0, "result": None}
+_broker_check_lock = threading.Lock()
+
+_SEGMENT_ACTIVATION_KEYWORDS = (
+    "segment",
+    "not permitted",
+    "not allowed",
+    "not activate",
+    "inactive segment",
+    "privileg",
+    "commodity segment",
+    "not enabled",
+    "unable to place",
+)
+
+
+def check_broker_trade_executed_today(access_token: Optional[str] = None, max_age_seconds: float = 30.0) -> Dict[str, Any]:
+    """
+    Broker-side ground truth: has this account ALREADY executed a trade today
+    (an open option position, OR any fill in an option segment)?
+
+    Reads Fyers directly (positions + tradebook), never local state files, so it
+    survives Railway redeploys where state.json/scheduler_state.json are lost.
+    Returns {"blocked": bool, "reason": str|None, "details": [str], "checked": bool}.
+    """
+    now = time.time()
+    with _broker_check_lock:
+        cached = _broker_check_cache.get("result")
+        if cached and cached.get("checked") and (now - _broker_check_cache.get("ts", 0.0)) < max_age_seconds:
+            return cached
+
+    result = {"blocked": False, "reason": None, "details": [], "checked": False}
+
+    tok = access_token or get_active_fyers_token()
+    if not tok or tok.startswith("MOCK"):
+        result["details"].append("No valid token; broker check skipped")
+        return result
+
+    try:
+        app_id = FYERS_APP_ID or os.getenv("FYERS_APP_ID", "").strip()
+        fyers = fyersModel.FyersModel(client_id=app_id, token=tok, is_async=False, log_path=os.path.dirname(TOKEN_FILE_PATH))
+        result["checked"] = True
+
+        # 1) Open option positions -> always block new entries
+        try:
+            pos = fyers.positions()
+            if isinstance(pos, dict) and pos.get("s") == "ok":
+                for p in pos.get("netPositions", []):
+                    if not isinstance(p, dict):
+                        continue
+                    sym = str(p.get("symbol") or "")
+                    net_qty = int(p.get("netQty", 0) or 0)
+                    if sym and net_qty != 0:
+                        result["blocked"] = True
+                        result["reason"] = result["reason"] or "LIVE_POSITION_OPEN"
+                        result["details"].append(f"{sym} qty {net_qty}")
+        except Exception as pos_err:
+            print(f"[Broker Check Positions Notice] {pos_err}")
+
+        # 2) Filled trades today in an option segment -> block new entries
+        try:
+            tb = fyers.tradebook()
+            if isinstance(tb, dict) and tb.get("s") == "ok":
+                today_ist = datetime.datetime.now(IST_TZ).date()
+                for t in tb.get("tradeBook", []):
+                    if not isinstance(t, dict):
+                        continue
+                    sym = str(t.get("symbol") or "")
+                    if not (sym.startswith("NSE:") or sym.startswith("MCX:")):
+                        continue
+                    if int(t.get("filledQty", 0) or 0) <= 0:
+                        continue
+                    day_match = True
+                    ts_raw = t.get("tradeTime") or t.get("exchTradeTime") or 0
+                    try:
+                        ts_raw = int(ts_raw)
+                        if ts_raw:
+                            ts_seconds = (ts_raw / 1000.0) if ts_raw > 1e12 else float(ts_raw)
+                            trade_dt = datetime.datetime.fromtimestamp(ts_seconds, IST_TZ)
+                            day_match = (trade_dt.date() == today_ist)
+                    except Exception:
+                        day_match = True
+                    if day_match:
+                        result["blocked"] = True
+                        result["reason"] = result["reason"] or "TRADE_EXECUTED_TODAY"
+                        result["details"].append(f"{sym} qty {t.get('filledQty')} @ {t.get('tradePrice') or t.get('price') or '?'}")
+        except Exception as tb_err:
+            print(f"[Broker Check Tradebook Notice] {tb_err}")
+    except Exception as init_err:
+        print(f"[Broker Check Notice] {init_err}")
+        result["details"].append(f"Broker check failed: {init_err}")
+
+    with _broker_check_lock:
+        _broker_check_cache["ts"] = time.time()
+        _broker_check_cache["result"] = result
+    return result
+
+
+def is_segment_activation_rejection(status: str, remarks: str) -> bool:
+    """True if a rejected order indicates the account cannot trade that segment."""
+    if status not in ("REJECTED",):
+        return False
+    low = str(remarks).lower()
+    return any(k in low for k in _SEGMENT_ACTIVATION_KEYWORDS)
+
+
+def mark_segment_disabled(segment: str, remarks: str):
+    """Persists a 'segment disabled for today' marker (state.json + flag file under
+    the persistent dir) so the engine stops retrying a segment the account cannot trade."""
+    today = datetime.datetime.now(IST_TZ).date().isoformat()
+    try:
+        from config.settings import SEGMENT_DISABLED_FLAG_PATTERN
+        flag = SEGMENT_DISABLED_FLAG_PATTERN.format(segment=segment)
+        os.makedirs(os.path.dirname(flag) or ".", exist_ok=True)
+        with open(flag, "w", encoding="utf-8") as f:
+            f.write(f"SEGMENT={segment}|DATE={today}|REASON={remarks}")
+    except Exception as e:
+        print(f"[Segment Disabled Flag Notice] {e}")
+    try:
+        sm = StateManager()
+        disabled = sm.state.setdefault("disabled_segments", {})
+        disabled[segment] = {"date": today, "remarks": str(remarks)[:300]}
+        sm._save_state(sm.state)
+    except Exception as e:
+        print(f"[Segment Disabled State Notice] {e}")
+    print(f"[Segment Disabled] {segment} marked disabled for {today}: {remarks}")
+
+
+def segment_disabled_today(segment: str) -> bool:
+    """True if the given segment (e.g. MCX_FO) was marked disabled today."""
+    today = datetime.datetime.now(IST_TZ).date().isoformat()
+    try:
+        from config.settings import SEGMENT_DISABLED_FLAG_PATTERN
+        flag = SEGMENT_DISABLED_FLAG_PATTERN.format(segment=segment)
+        if os.path.exists(flag):
+            with open(flag, "r", encoding="utf-8") as f:
+                if f"DATE={today}" in f.read():
+                    return True
+    except Exception:
+        pass
+    try:
+        sm = StateManager()
+        entry = sm.state.get("disabled_segments", {}).get(segment, {})
+        return entry.get("date") == today
+    except Exception:
+        return False
 
 
 def check_fyers_credentials_configured() -> tuple:
@@ -559,6 +709,36 @@ class FyersTrader:
             status = order_res.get("status", "REJECTED")
             remarks = order_res.get("remarks", "Order not filled")
             print(f"[Fyers Execution Aborted] Order status: {status}. Remarks: {remarks}")
+
+            segment = "MCX_FO" if "MCX" in symbol else "NSE_FO"
+
+            # Segment-activation rejection (e.g. MCX not enabled on the account): mark the
+            # segment disabled for today and alert the user - do NOT halt the whole engine.
+            if not self.dry_run and is_segment_activation_rejection(status, str(remarks)):
+                mark_segment_disabled(segment, f"{status}: {remarks}")
+                try:
+                    from reporting.telegram_bot import send_telegram_message
+                    send_telegram_message(
+                        f"🚫 <b>[SEGMENT DISABLED ON BROKER]</b>\n"
+                        "========================================\n"
+                        f"<b>Segment   :</b> {segment}\n"
+                        f"<b>Contract  :</b> <code>{symbol}</code>\n"
+                        f"<b>Broker Msg:</b> <code>{remarks}</code>\n"
+                        "========================================\n"
+                        "Your Fyers account cannot trade this segment. The engine will NOT retry it today. "
+                        "Enable the segment on your broker and it will be re-evaluated tomorrow.",
+                    )
+                except Exception as tele_err:
+                    print(f"[Segment Disabled Telegram Notice] {tele_err}")
+                return {
+                    "trade_id": None,
+                    "order_id": order_res.get("order_id"),
+                    "instrument_key": symbol,
+                    "option_symbol": option_contract["option_symbol"],
+                    "status": "SEGMENT_DISABLED",
+                    "exchange": segment,
+                    "remarks": remarks,
+                }
 
             if not self.dry_run:
                 handle_execution_issue_and_halt(
