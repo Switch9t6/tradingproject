@@ -411,54 +411,83 @@ def _register_handlers(bot):
             bot.reply_to(message, "Market is closed. Active trading sessions: Session 1 NSE (09:00 - 15:30 IST) & Session 2 MCX (17:00 - 23:15 IST).", reply_markup=_build_action_keyboard(telebot))
             return
 
+        from execution.fyers_trader import check_fyers_credentials_configured, verify_and_fetch_live_fyers_balance
+        is_conf, conf_msg = check_fyers_credentials_configured()
+        if not is_conf:
+            _send_or_reply(
+                bot, message,
+                "🛑 <b>[RESUME REJECTED - FYERS SETUP INCOMPLETE]</b>\n"
+                "========================================\n"
+                f"<b>Reason :</b> {conf_msg}\n"
+                "========================================\n"
+                "👉 Please add your 5 Fyers credentials (FYERS_APP_ID, FYERS_SECRET_KEY, FYERS_USERNAME, FYERS_PIN_CODE, FYERS_TOTP_SECRET) to .env before resuming.",
+                reply_markup=_build_action_keyboard(telebot)
+            )
+            return
+
+        is_verified, bal, err_msg = verify_and_fetch_live_fyers_balance()
+        if not is_verified or bal <= 0:
+            _send_or_reply(
+                bot, message,
+                "🛑 <b>[RESUME REJECTED - FYERS VERIFICATION FAILED]</b>\n"
+                "========================================\n"
+                f"<b>Details :</b> {err_msg}\n"
+                "========================================\n"
+                "👉 Verify your Fyers credentials in .env. Trading engine remains HALTED for safety.",
+                reply_markup=_build_action_keyboard(telebot)
+            )
+            return
+
         try:
             if os.path.exists(BOT_DISABLED_FLAG):
                 os.remove(BOT_DISABLED_FLAG)
+            from execution.state_manager import StateManager
+            sm = StateManager()
+            sm.state["is_nse_locked_today"] = False
+            sm.state["is_mcx_locked_today"] = False
+            sm.state["current_wallet_balance"] = bal
+            sm._save_state(sm.state)
+        except Exception:
+            pass
+        _send_or_reply(
+            bot, message,
+            f"▶️ <b>[TRADING ENGINE RESUMED & FYERS VERIFIED]</b>\n"
+            "========================================\n"
+            f"<b>Broker          :</b> Fyers API v3\n"
+            f"<b>Live Cash Margin:</b> <code>Rs {bal:,.2f} INR</code> (Verified)\n"
+            "========================================\n"
+            "Dynamic scanning re-enabled. Emergency locks cleared.",
+            reply_markup=_build_action_keyboard(telebot)
+        )
+        _safe_print("[Telegram Control] Trading engine RESUMED & FYERS VERIFIED via Telegram /resume command.")
+
+        def _run_resume_job():
             try:
-                from execution.state_manager import StateManager
-                sm = StateManager()
-                sm.state["is_nse_locked_today"] = False
-                sm.state["is_mcx_locked_today"] = False
-                sm._save_state(sm.state)
-            except Exception:
-                pass
-            bot.reply_to(
-                message,
-                "▶️ [TRADING ENGINE RESUMED]\n"
-                "Dynamic scanning re-enabled. Emergency locks cleared. Triggering active session market scan...",
-                reply_markup=_build_action_keyboard(telebot)
-            )
-            _safe_print("[Telegram Control] Trading engine RESUMED via Telegram /resume command.")
+                cmd = [sys.executable, "main.py", "--live", "--auto-approve", "--override-daily-limit"]
+                _safe_print(f"[Telegram Control] Executing pipeline scan via /resume: {' '.join(cmd)}")
+                env = os.environ.copy()
+                env["TELEGRAM_LISTENER_DISABLED"] = "1"
+                env["IS_DRY_RUN"] = "False"
+                proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                out, _ = proc.communicate(timeout=180)
+                if out and "EXECUTING AGGRESSIVE LIMIT ORDER (FYERS" in out and "REJECTED" not in out:
+                    bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[ORDER PLACED ON FYERS]</b>\n\n<pre>{out[-600:]}</pre>", parse_mode="HTML")
+                elif out and "REJECTED" in out:
+                    bot.send_message(TELEGRAM_CHAT_ID,
+                        "❌ <b>[FYERS API - ORDER REJECTED]</b>\n"
+                        "========================================\n"
+                        "Fyers rejected the order.\n"
+                        "Action Required: Verify Fyers credentials in .env.",
+                        parse_mode="HTML")
+                elif out and ("Session lock" in out or "cap reached" in out):
+                    bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[SESSION LOCK]</b> Session trade cap reached for today.", parse_mode="HTML")
+                else:
+                    bot.send_message(TELEGRAM_CHAT_ID, f"ℹ️ <b>[PIPELINE SUMMARY]</b>\n<pre>{out[-400:] if out else 'Scan finished'}</pre>", parse_mode="HTML")
+            except Exception as ex:
+                _safe_print(f"[Telegram Control Run Error] {ex}")
 
-            def _run_resume_job():
-                try:
-                    cmd = [sys.executable, "main.py", "--live", "--auto-approve", "--override-daily-limit"]
-                    _safe_print(f"[Telegram Control] Executing pipeline scan via /resume: {' '.join(cmd)}")
-                    env = os.environ.copy()
-                    env["TELEGRAM_LISTENER_DISABLED"] = "1"
-                    env["IS_DRY_RUN"] = "False"
-                    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                    out, _ = proc.communicate(timeout=180)
-                    if out and "EXECUTING AGGRESSIVE LIMIT ORDER (UPSTOX" in out and "REJECTED" not in out:
-                        bot.send_message(TELEGRAM_CHAT_ID, f"✅ <b>[ORDER PLACED ON UPSTOX]</b>\n\n<pre>{out[-600:]}</pre>", parse_mode="HTML")
-                    elif out and "REJECTED" in out:
-                        bot.send_message(TELEGRAM_CHAT_ID,
-                            "❌ <b>[UPSTOX API - ORDER REJECTED]</b>\n"
-                            "========================================\n"
-                            "Upstox rejected the order.\n"
-                            "Action Required: Send /settoken with a fresh token.",
-                            parse_mode="HTML")
-                    elif out and ("Session lock" in out or "cap reached" in out):
-                        bot.send_message(TELEGRAM_CHAT_ID, "ℹ️ <b>[SESSION LOCK]</b> Session trade cap reached for today.", parse_mode="HTML")
-                    else:
-                        bot.send_message(TELEGRAM_CHAT_ID, f"ℹ️ <b>[PIPELINE SUMMARY]</b>\n<pre>{out[-400:] if out else 'Scan finished'}</pre>", parse_mode="HTML")
-                except Exception as ex:
-                    _safe_print(f"[Telegram Control Run Error] {ex}")
-
-            t = threading.Thread(target=_run_resume_job, daemon=True)
-            t.start()
-        except Exception as e:
-            bot.reply_to(message, f"[ERROR] Failed to resume: {e}")
+        t = threading.Thread(target=_run_resume_job, daemon=True)
+        t.start()
 
     @bot.message_handler(commands=["status"])
     def cmd_status(message):
