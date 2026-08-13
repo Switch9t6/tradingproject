@@ -28,11 +28,39 @@ from config.settings import (
 _last_totp_attempt_time = 0.0
 
 
+def check_fyers_credentials_configured() -> tuple:
+    """
+    Checks if user has provided all 5 valid Fyers API v3 credentials in .env file.
+    Returns (is_configured: bool, status_msg: str).
+    """
+    app_id = (FYERS_APP_ID or os.getenv("FYERS_APP_ID", "")).strip()
+    secret_key = (FYERS_SECRET_KEY or os.getenv("FYERS_SECRET_KEY", "")).strip()
+    username = (FYERS_USERNAME or os.getenv("FYERS_USERNAME", "")).strip()
+    pin_code = (FYERS_PIN_CODE or os.getenv("FYERS_PIN_CODE", "")).strip()
+    totp_secret = (FYERS_TOTP_SECRET or os.getenv("FYERS_TOTP_SECRET", "")).strip()
+
+    missing = []
+    if not app_id or app_id.startswith("YOUR_"): missing.append("FYERS_APP_ID")
+    if not secret_key or secret_key.startswith("YOUR_"): missing.append("FYERS_SECRET_KEY")
+    if not username or username.startswith("YOUR_"): missing.append("FYERS_USERNAME")
+    if not pin_code or pin_code.startswith("YOUR_"): missing.append("FYERS_PIN_CODE")
+    if not totp_secret or totp_secret.startswith("YOUR_"): missing.append("FYERS_TOTP_SECRET")
+
+    if missing:
+        return False, f"Pending Fyers credentials in .env: {', '.join(missing)}"
+    return True, "CONFIGURED"
+
+
 def auto_generate_fyers_token(force: bool = False) -> str:
     """
     Programmatically logs in to Fyers API v3 using TOTP 2FA, generates a fresh 24-hour Access Token,
     and updates environment variables, .env, and logs/fyers_access_token.json without manual browser intervention.
     """
+    is_conf, conf_msg = check_fyers_credentials_configured()
+    if not is_conf:
+        print(f"⚠️ [FYERS MIGRATION INCOMPLETE] {conf_msg}")
+        return get_active_fyers_token()
+
     global _last_totp_attempt_time
     now = time.time()
 
@@ -178,6 +206,10 @@ def verify_and_fetch_live_fyers_balance(access_token: Optional[str] = None) -> t
     Queries Fyers API v3 directly to verify live wallet balance.
     Returns tuple: (is_verified: bool, balance: float, status_msg: str).
     """
+    is_conf, conf_msg = check_fyers_credentials_configured()
+    if not is_conf:
+        return False, 0.0, f"MIGRATION INCOMPLETE: {conf_msg}"
+
     tok = access_token or get_active_fyers_token()
 
     for attempt in range(2):
