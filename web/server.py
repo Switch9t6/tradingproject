@@ -27,9 +27,21 @@ app = Flask(__name__, template_folder=TEMPLATE_DIR)
 @app.route("/report")
 def report_page():
     """Renders interactive HTML performance report web dashboard."""
-    # Optional token verification if passed via telegram URL
     token = request.args.get("token", "")
     return render_template("report.html", token=token)
+
+@app.route("/webhook", methods=["GET", "POST"])
+def fyers_webhook():
+    """Fyers Webhook validation & order update listener."""
+    if request.method == "GET":
+        return jsonify({"status": "ACTIVE", "message": "Fyers Webhook Endpoint Active"}), 200
+
+    try:
+        data = request.get_json(silent=True) or request.form.to_dict()
+        print(f"[FYERS WEBHOOK RECEIVED] {data}")
+        return jsonify({"status": "SUCCESS", "message": "Webhook payload received"}), 200
+    except Exception as ex:
+        return jsonify({"status": "ERROR", "error": str(ex)}), 400
 
 @app.route("/api/report_data")
 def api_report_data():
