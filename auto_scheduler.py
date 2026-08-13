@@ -62,7 +62,7 @@ def check_token_expiry_prompt():
     try:
         from config.settings import TOKEN_FILE_PATH
         import json
-        from execution.upstox_trader import auto_generate_upstox_token, get_live_wallet_balance
+        from execution.fyers_trader import auto_generate_fyers_token, get_live_wallet_balance
         
         need_refresh = False
         if os.path.exists(TOKEN_FILE_PATH):
@@ -77,11 +77,11 @@ def check_token_expiry_prompt():
 
         if need_refresh:
             print("[Token Expiry Checker] 23-hour token age reached. Initiating Headless TOTP Auto-Login...")
-            new_tok = auto_generate_upstox_token()
+            new_tok = auto_generate_fyers_token()
             if new_tok and not new_tok.startswith("MOCK") and not new_tok.startswith("your_"):
                 avail = get_live_wallet_balance(new_tok)
                 send_telegram_alert(
-                    "✅ <b>[UPSTOX TOKEN AUTO-RENEWED]</b>\n"
+                    "✅ <b>[FYERS TOKEN AUTO-RENEWED]</b>\n"
                     "========================================\n"
                     "Fresh 24-hour Access Token generated via Headless TOTP Auto-Login!\n"
                     f"<b>Available Cash Balance:</b> <code>Rs {avail:,.2f} INR</code>\n"
@@ -94,22 +94,20 @@ def check_token_expiry_prompt():
 
 def start_automated_daemon():
     print("=" * 80)
-    print("     24/7 AUTOMATED QUANTITATIVE TRADING DAEMON INITIALIZED (UPSTOX API V2)     ")
+    print("     24/7 AUTOMATED QUANTITATIVE TRADING DAEMON INITIALIZED (FYERS API V3)     ")
     print("=" * 80)
     print("Schedules:")
     print("  - Session 1 (NSE Equity & Options) : Mon-Fri @ 09:15 AM IST")
     print("  - Session 2 (MCX Crude Oil Options): Mon-Fri @ 05:00 PM IST")
-    print("  - Upstox Token 23-Hour Expiry Monitor: Active Every 15 Minutes")
     print("Listening for schedule triggers...\n")
     
     send_telegram_alert(
         f"🤖 <b>[24/7 AUTOMATION ONLINE]</b>\n"
         f"========================================\n"
-        f"Broker Gateway   : Upstox API v2\n"
+        f"Broker Gateway   : Fyers API v3\n"
         f"System Status    : FULLY AUTOMATED & STANDING BY\n"
         f"Session 1 Schedule: Mon-Fri @ 09:15 AM IST (NSE)\n"
         f"Session 2 Schedule: Mon-Fri @ 05:00 PM IST (MCX)\n"
-        f"Token Monitor    : Auto-Prompt at 23 Hours Active\n"
         f"========================================\n"
         f"No manual intervention required. Trades will execute automatically!"
     )

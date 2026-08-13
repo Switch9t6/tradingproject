@@ -18,6 +18,16 @@ UPSTOX_TOTP_SECRET = os.getenv("UPSTOX_TOTP_SECRET", "")
 # Upstox API Base Endpoint
 UPSTOX_API_BASE_URL = "https://api.upstox.com/v2"
 
+# Fyers API v3 Credentials & Configuration (Zero Static IP Restrictions)
+FYERS_APP_ID = os.getenv("FYERS_APP_ID", os.getenv("FYERS_CLIENT_ID", ""))
+FYERS_SECRET_KEY = os.getenv("FYERS_SECRET_KEY", "")
+FYERS_REDIRECT_URI = os.getenv("FYERS_REDIRECT_URI", "https://trade.fyers.in/api-login/default/ui/middleware")
+FYERS_USERNAME = os.getenv("FYERS_USERNAME", "")
+FYERS_PIN_CODE = os.getenv("FYERS_PIN_CODE", "")
+FYERS_TOTP_SECRET = os.getenv("FYERS_TOTP_SECRET", "")
+FYERS_ACCESS_TOKEN = os.getenv("FYERS_ACCESS_TOKEN", "")
+FYERS_API_BASE_URL = "https://api-t1.fyers.in/api/v3"
+
 # Security & Capital Constraints
 INITIAL_WALLET_CAPITAL = 100000.0          # Upstox Live Wallet Available Cash Base (INR 100,000.00)
 MICRO_CAPITAL_BUDGET_CAP = 1000.0          # Budget Cap <= INR 1,000.00 for micro sizing
@@ -173,5 +183,6 @@ DATA_DIR = os.path.join(BASE_DIR, "data_cache")
 LOGS_DIR = os.path.join(PERSISTENT_BASE_DIR, "logs")
 REPORTS_DIR = os.path.join(PERSISTENT_BASE_DIR, "reports")
 TOKEN_FILE_PATH = os.path.join(PERSISTENT_BASE_DIR, "access_token.json")
+FYERS_TOKEN_FILE_PATH = os.path.join(PERSISTENT_BASE_DIR, "fyers_access_token.json")
 STATE_FILE_PATH = os.path.join(PERSISTENT_BASE_DIR, "state.json")
 DB_FILE_PATH = os.path.join(LOGS_DIR, "trades.db")

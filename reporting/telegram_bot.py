@@ -88,7 +88,7 @@ def send_signal_detected_alert(
     return sent
 
 
-def send_order_placed_alert(
+def send_order_placement_alert(
     option_symbol: str,
     lot_size: int,
     limit_price: float,
@@ -96,18 +96,18 @@ def send_order_placed_alert(
     execution_mode: str = "LIVE PRODUCTION"
 ) -> bool:
     """
-    Dispatches immediate order placement notification when order is sent to Dhan API.
+    Dispatches immediate order placement notification when order is sent to Upstox API.
     """
     msg = (
-        f"🚀 <b>[DHAN ORDER PLACED]</b>\n"
+        f"🚀 <b>[UPSTOX ORDER PLACED]</b>\n"
         f"========================================\n"
         f"<b>Contract Symbol :</b> <code>{option_symbol}</code>\n"
         f"<b>Execution Mode  :</b> {execution_mode}\n"
         f"<b>Order Quantity  :</b> {lot_size} shares (1 Lot)\n"
         f"<b>Limit Premium   :</b> Rs {limit_price:.2f}\n"
-        f"<b>Dhan Order ID   :</b> <code>{order_id or 'PENDING'}</code>\n"
+        f"<b>Upstox Order ID :</b> <code>{order_id or 'PENDING'}</code>\n"
         f"========================================\n"
-        f"<i>Verifying order fill status on Dhan API...</i>"
+        f"<i>Verifying order fill status on Upstox API...</i>"
     )
     return send_telegram_message(msg)
 
@@ -130,7 +130,7 @@ def send_trade_entry_alert(trade_data: Dict[str, Any], wallet_balance: float = 0
         f"⚡ <b>[EXECUTED TRADE NOTIFICATION - {mode}]</b>\n"
         f"========================================\n"
         f"<b>Contract Symbol :</b> <code>{option_symbol}</code>\n"
-        f"<b>Execution Mode  :</b> REAL LIVE DHAN ORDER\n"
+        f"<b>Execution Mode  :</b> REAL LIVE UPSTOX ORDER\n"
         f"<b>Order Quantity  :</b> {lot_size} shares (1 Lot)\n"
         f"<b>Fill Premium    :</b> Rs {entry_p:.2f} / share\n"
         f"<b>Total Cost      :</b> Rs {total_value:,.2f} INR\n"

@@ -97,8 +97,8 @@ def get_trade_report_data(
     # Fallback for Today's Live Trades if DB is empty and start_date == today
     if not trades and start_date == today_str and end_date == today_str:
         try:
-            from reporting.eod_reporter import fetch_dhan_live_order_book_trades
-            trades = fetch_dhan_live_order_book_trades()
+            from reporting.eod_reporter import fetch_upstox_live_order_book_trades
+            trades = fetch_upstox_live_order_book_trades()
         except Exception:
             pass
 
@@ -295,9 +295,9 @@ def generate_html_report_file(start_date: Optional[str] = None, end_date: Option
     <div class="header">
         <div>
             <h1><i class="fa-solid fa-chart-line" style="color: var(--accent-blue);"></i> QUANTITATIVE SYSTEM PERFORMANCE REPORT</h1>
-            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px;">Period: {start_date} to {end_date} | DhanHQ Live Synced</p>
+            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px;">Period: {start_date} to {end_date} | Upstox Live Synced</p>
         </div>
-        <span class="badge"><i class="fa-solid fa-shield-halved"></i> DhanHQ API v2 Verified</span>
+        <span class="badge"><i class="fa-solid fa-shield-halved"></i> Upstox API v2 Verified</span>
     </div>
 
     <div class="metrics-grid">

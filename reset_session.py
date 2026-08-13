@@ -9,10 +9,10 @@ from config.settings import STATE_FILE_PATH, DB_FILE_PATH, INITIAL_WALLET_CAPITA
 
 today = datetime.date.today().isoformat()
 
-# Try querying live Upstox wallet balance if available
+# Try querying live Fyers wallet balance if available
 live_wallet = INITIAL_WALLET_CAPITAL
 try:
-    from execution.upstox_trader import get_live_wallet_balance
+    from execution.fyers_trader import get_live_wallet_balance
     wb = get_live_wallet_balance()
     if wb > 0:
         live_wallet = wb

@@ -4,6 +4,12 @@ import time
 import argparse
 import datetime
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    except Exception:
+        pass
+
 from auth.oauth_server import run_oauth_flow
 from scanner.nse500_scanner import scan_nse500_and_indices
 from scanner.option_mapper import resolve_atm_option_contract, get_mcx_crude_option_contract
@@ -12,7 +18,7 @@ from scanner.macro_sector_engine import MacroSectorNewsEngine
 from scanner.crude_scanner import scan_mcx_crude_oil
 from scanner.crude_news_engine import is_crude_news_blackout_window
 from scanner.smart_scanner import scan_smart_opportunities
-from execution.upstox_trader import UpstoxTrader, get_live_wallet_balance, auto_generate_upstox_token
+from execution.fyers_trader import FyersTrader, get_live_wallet_balance, auto_generate_fyers_token, verify_and_fetch_live_fyers_balance, handle_execution_issue_and_halt
 from execution.telegram_control import start_telegram_listener_background, is_bot_disabled
 from web.server import start_web_server_background
 from reporting.eod_reporter import generate_eod_report
@@ -74,10 +80,10 @@ def _halt_engine_and_alert_telegram(reason: str):
         msg = (
             "🚨 <b>[PRE-FLIGHT GATE FAILED - ENGINE HALTED]</b>\n"
             "========================================\n"
-            "<b>Reason          :</b> Could not verify real-time Upstox wallet balance.\n"
+            "<b>Reason          :</b> Could not verify real-time Fyers wallet balance.\n"
             f"<b>Error Details   :</b> <code>{reason}</code>\n"
             "========================================\n"
-            "⚠️ <i>TRADING ENGINE PAUSED FOR SAFETY. Please verify Upstox credentials and send /resume on Telegram once verified.</i>"
+            "⚠️ <i>TRADING ENGINE PAUSED FOR SAFETY. Please verify Fyers credentials and send /resume on Telegram once verified.</i>"
         )
         send_telegram_message(msg)
     except Exception:
@@ -87,29 +93,28 @@ def _halt_engine_and_alert_telegram(reason: str):
 def morning_preflight_checks(dry_run: bool = False) -> float:
     """
     Morning Boot Sequence & Pre-Flight Verification (08:50 AM IST):
-    1. Programmatically auto-generates fresh Upstox Access Token using TOTP.
-    2. STRICT VERIFICATION GATE: Fetches real-time live wallet balance directly from Upstox API v2.
-    3. If balance CANNOT be verified from Upstox API, STOPS THE ENGINE for safety & alerts Telegram.
+    1. Programmatically auto-generates fresh Fyers Access Token using TOTP.
+    2. STRICT VERIFICATION GATE: Fetches real-time live wallet balance directly from Fyers API v3.
+    3. If balance CANNOT be verified, STOPS THE ENGINE for safety & alerts Telegram.
     4. If verified, updates state.json and notifies Telegram.
     """
-    print("\n[08:50 AM IST] Executing Morning Pre-flight Boot Sequence...")
+    print("\n[08:50 AM IST] Executing Morning Pre-flight Boot Sequence (Fyers API v3)...")
     if dry_run:
         print("[Pre-flight Dry-Run] Simulation mode active. Skipping live broker funds gate.")
         return INITIAL_WALLET_CAPITAL
 
     # Step 1: Auto-Generate Access Token via Headless TOTP
-    token = auto_generate_upstox_token()
+    token = auto_generate_fyers_token()
     if not token or token.startswith("MOCK") or token.startswith("your_"):
-        print("[CRITICAL PRE-FLIGHT FAILURE] Failed to generate Upstox Access Token via TOTP.")
-        _halt_engine_and_alert_telegram("Failed to generate Upstox Access Token via TOTP.")
+        print("[CRITICAL PRE-FLIGHT FAILURE] Failed to generate Fyers Access Token via TOTP.")
+        _halt_engine_and_alert_telegram("Failed to generate Fyers Access Token via TOTP.")
         return 0.0
 
     # Step 2: Strict Live Wallet Balance Verification Gate
-    from execution.upstox_trader import verify_and_fetch_live_upstox_balance
-    is_verified, bal, err_msg = verify_and_fetch_live_upstox_balance(access_token=token)
+    is_verified, bal, err_msg = verify_and_fetch_live_fyers_balance(access_token=token)
 
     if not is_verified or bal <= 0:
-        print(f"[PRE-FLIGHT GATE FAILED] Live Upstox wallet balance COULD NOT BE VERIFIED: {err_msg}")
+        print(f"[PRE-FLIGHT GATE FAILED] Live Fyers wallet balance COULD NOT BE VERIFIED: {err_msg}")
         _halt_engine_and_alert_telegram(err_msg)
         return 0.0
 
@@ -185,10 +190,10 @@ def run_mcx_crude_pipeline(
     state_mgr = StateManager()
 
     if not dry_run:
-        from execution.upstox_trader import verify_and_fetch_live_upstox_balance
-        is_verified, verified_bal, err_msg = verify_and_fetch_live_upstox_balance()
+        from execution.fyers_trader import verify_and_fetch_live_fyers_balance, handle_execution_issue_and_halt
+        is_verified, verified_bal, err_msg = verify_and_fetch_live_fyers_balance()
         if not is_verified or verified_bal <= 0:
-            print(f"[CRITICAL SAFETY HALT] MCX Pipeline stopped because live Upstox wallet balance could not be verified: {err_msg}")
+            print(f"[CRITICAL SAFETY HALT] MCX Pipeline stopped because live Fyers wallet balance could not be verified: {err_msg}")
             _halt_engine_and_alert_telegram(err_msg)
             return
         live_wallet = verified_bal
@@ -199,7 +204,7 @@ def run_mcx_crude_pipeline(
 
     print("=" * 80)
     print("             SESSION 2: MCX CRUDE OIL COMMODITY OPTIONS ENGINE             ")
-    print(f"      Mode: REAL LIVE PRODUCTION (Upstox API v2 / MCX_FO)")
+    print(f"      Mode: REAL LIVE PRODUCTION (Fyers API v3 / MCX_FO)")
     print(f"      Wallet Base: Rs {live_wallet:,.2f} INR | Single Lot Budget Cap: Rs {budget_cap:,.2f} INR")
     print("=" * 80)
 
@@ -225,8 +230,7 @@ def run_mcx_crude_pipeline(
     if not access_token:
         print("[Error] Failed to acquire valid access token for MCX Session.")
         if not dry_run:
-            from execution.upstox_trader import handle_execution_issue_and_halt
-            handle_execution_issue_and_halt("Authentication Failed", "Failed to acquire valid Upstox Access Token for MCX Session.", "MCX_CRUDE")
+            handle_execution_issue_and_halt("Authentication Failed", "Failed to acquire valid Fyers Access Token for MCX Session.", "MCX_CRUDE")
         return
 
     # 5. Scan MCX Crude Oil Multi-Factor 100-Point Matrix via Smart Scanner
@@ -258,7 +262,7 @@ def run_mcx_crude_pipeline(
         return
 
     # 8. Execute Order Gateway & Position Monitor
-    trader = UpstoxTrader(dry_run=dry_run, force_reset=reset_state)
+    trader = FyersTrader(dry_run=dry_run, force_reset=reset_state)
     trade_result = trader.execute_option_trade(
         option_contract,
         max_budget=budget_cap,
@@ -274,16 +278,17 @@ def run_daily_pipeline(
     override_daily_limit: bool = False,
     auto_approve: bool = False,
     session: str = "auto",
+    broker: str = "fyers",
     dry_run: bool = False
 ):
     """
-    Master Orchestrator supporting Dual-Session Execution & Automated 24-Hour Token Renewal:
-    - session='nse': Runs Session 1 NSE Equity Options Pipeline.
-    - session='mcx': Runs Session 2 MCX Crude Oil Options Pipeline.
-    - session='auto': Automatically detects active session based on current IST time.
+    Master Orchestrator supporting Multi-Broker (Fyers / Upstox) & Dual-Session Execution:
+    - broker='fyers': Uses Fyers API v3 (Zero Static IP Restrictions).
+    - broker='upstox': Uses Upstox API v2.
     """
     now_ist = get_ist_now()
     current_time = now_ist.time()
+    broker_tag = broker.lower().strip()
 
     if session == "mcx" or (session == "auto" and current_time >= datetime.time(16, 30)):
         run_mcx_crude_pipeline(
@@ -299,10 +304,17 @@ def run_daily_pipeline(
     state_mgr = StateManager()
 
     if not dry_run:
-        from execution.upstox_trader import verify_and_fetch_live_upstox_balance
-        is_verified, verified_bal, err_msg = verify_and_fetch_live_upstox_balance()
+        if broker_tag == "fyers":
+            from execution.fyers_trader import verify_and_fetch_live_fyers_balance
+            is_verified, verified_bal, err_msg = verify_and_fetch_live_fyers_balance()
+            broker_name = "Fyers API v3"
+        else:
+            from execution.upstox_trader import verify_and_fetch_live_upstox_balance
+            is_verified, verified_bal, err_msg = verify_and_fetch_live_upstox_balance()
+            broker_name = "Upstox API v2"
+
         if not is_verified or verified_bal <= 0:
-            print(f"[CRITICAL SAFETY HALT] Pipeline stopped because live Upstox wallet balance could not be verified: {err_msg}")
+            print(f"[CRITICAL SAFETY HALT] Pipeline stopped because live {broker_name} wallet balance could not be verified: {err_msg}")
             _halt_engine_and_alert_telegram(err_msg)
             return
         live_wallet = verified_bal
@@ -312,8 +324,8 @@ def run_daily_pipeline(
     budget_cap = MICRO_CAPITAL_BUDGET_CAP if micro_capital else live_wallet
     
     print("=" * 80)
-    print("             SESSION 1: NSE EQUITY & INDEX OPTIONS ENGINE                 ")
-    print(f"      Mode: REAL LIVE PRODUCTION (Upstox API v2 / NSE_FO)")
+    print(f"             SESSION 1: NSE EQUITY & INDEX OPTIONS ENGINE ({broker.upper()})            ")
+    print(f"      Mode: REAL LIVE PRODUCTION ({'Fyers API v3 (No IP Lock)' if broker_tag == 'fyers' else 'Upstox API v2'} / NSE_FO)")
     print(f"      Wallet Base: Rs {live_wallet:,.2f} INR | Single Lot Budget Cap: Rs {budget_cap:,.2f} INR")
     print(f"      Daily Cap: {'MANUAL OVERRIDE ACTIVE' if override_daily_limit else f'MAX {MAX_DAILY_TRADES} TRADE/DAY'}")
     print("=" * 80)
@@ -335,14 +347,16 @@ def run_daily_pipeline(
     if not access_token:
         print("[Error] Failed to acquire valid access token. Aborting pipeline.")
         if not dry_run:
-            from execution.upstox_trader import handle_execution_issue_and_halt
-            handle_execution_issue_and_halt("Authentication Failed", "Failed to acquire valid Upstox Access Token for NSE Session.", "NSE_EQUITY")
+            from execution.fyers_trader import handle_execution_issue_and_halt
+            handle_execution_issue_and_halt("Authentication Failed", "Failed to acquire valid Fyers Access Token for NSE Session.", "NSE_EQUITY")
         return
 
-    trader = UpstoxTrader(dry_run=dry_run, force_reset=reset_state)
+    from execution.fyers_trader import FyersTrader
+    trader = FyersTrader(dry_run=dry_run, force_reset=reset_state)
+
     live_wallet = trader.get_read_only_wallet_balance()
     budget_cap = MICRO_CAPITAL_BUDGET_CAP if micro_capital else live_wallet
-    print(f"  [Wallet Ingestion Verified] Upstox Live Available Cash: Rs {live_wallet:,.2f} INR")
+    print(f"  [Wallet Ingestion Verified] FYERS Live Available Cash: Rs {live_wallet:,.2f} INR")
 
     # News Blackout Check
     if not can_trade_during_news_window():
@@ -417,11 +431,24 @@ def execute_hard_eod_squareoff(access_token: str = None, dry_run: bool = False, 
         print(f"  [EOD Square-off] 0 open positions. All positions squared off cleanly.")
         return None
 
-    trader = UpstoxTrader(dry_run=dry_run)
+    from execution.fyers_trader import FyersTrader
+    trader = FyersTrader(dry_run=dry_run)
     print(f"  [EOD Square-off] Squaring off active position: {active_pos.get('option_symbol')}")
     return True
 
+def print_server_public_ip():
+    """Prints the outgoing public IP address of the current running server/host."""
+    try:
+        import requests
+        ip = requests.get("https://api.ipify.org", timeout=5).text.strip()
+        print(f"[SERVER PUBLIC IP AUDIT] Current Outgoing Public IPv4: {ip}")
+        return ip
+    except Exception as e:
+        print(f"[SERVER PUBLIC IP AUDIT] Could not fetch IP: {e}")
+        return None
+
 if __name__ == "__main__":
+    print_server_public_ip()
     parser = argparse.ArgumentParser(description="Master Dual-Session Orchestrator for NSE Equity & MCX Crude Oil Options (Upstox API v2)")
     parser.add_argument("--live", action="store_true", help="Run live market trading mode")
     parser.add_argument("--dry-run", action="store_true", help="Run simulation execution mode (no live order placement)")
@@ -432,8 +459,10 @@ if __name__ == "__main__":
     parser.add_argument("--auto-approve", "--yes", action="store_true", help="Auto-approve trade orders without interactive confirmation prompt")
     parser.add_argument("--reset-state", action="store_true", help="Force reset daily state lock for a fresh session run")
     parser.add_argument("--daemon", action="store_true", help="Run in continuous 24/7 cloud daemon mode for Railway deployment")
+    parser.add_argument("--broker", type=str, choices=["fyers", "upstox"], default=os.getenv("PREFERRED_BROKER", "fyers"), help="Select execution broker: 'fyers' (Zero IP Restrictions) or 'upstox'")
     args = parser.parse_args()
     session_target = "mcx" if args.crude_only else args.session
+    broker_choice = args.broker.lower().strip()
     is_cloud_env = args.daemon or bool(os.path.exists("/data")) or bool(os.getenv("RAILWAY_ENVIRONMENT")) or bool(os.getenv("RAILWAY_PROJECT_ID")) or bool(os.getenv("PORT"))
     env_dry = os.getenv("IS_DRY_RUN", "").strip().lower()
     if env_dry in ["false", "0", "no"]:
@@ -454,6 +483,7 @@ if __name__ == "__main__":
         override_daily_limit=args.override_daily_limit,
         auto_approve=args.auto_approve,
         session=session_target,
+        broker=broker_choice,
         dry_run=is_dry_run
     )
 

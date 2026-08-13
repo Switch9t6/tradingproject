@@ -402,7 +402,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="header">
             <div class="header-title">
                 <h1>INTRADAY OPTIONS TRADING DASHBOARD</h1>
-                <div class="header-subtitle">DhanHQ API v2 Autonomous Options Execution Engine</div>
+                <div class="header-subtitle">Upstox API v2 Autonomous Options Execution Engine</div>
             </div>
             <div class="badges">
                 <span class="badge {{ 'badge-mode-dryrun' if is_dry_run else 'badge-mode-live' }}">
@@ -506,7 +506,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
 
         <div class="footer">
-            <p>DhanHQ API v2 Autonomous Options Execution Engine | Security Verified Fund Compliance</p>
+            <p>Upstox API v2 Autonomous Options Execution Engine | Security Verified Fund Compliance</p>
         </div>
     </div>
 </body>
@@ -646,9 +646,9 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
     except Exception:
         pass
 
-    # Fallback: fetch live trades directly from DhanHQ Order Book API
+    # Fallback: fetch live trades directly from Upstox Order Book API
     if not trades and not dry_run:
-        trades = fetch_dhan_live_order_book_trades()
+        trades = fetch_upstox_live_order_book_trades()
     
     total_trades = len(trades)
     winning_trades = sum(1 for t in trades if (t.get("net_pnl") or 0) > 0)

@@ -478,33 +478,33 @@ def _register_handlers(bot):
         is_paused = os.path.exists(BOT_DISABLED_FLAG)
         engine_state = "PAUSED (Kill Switch Active)" if is_paused else ("ONLINE & SCANNING" if (nse_active or mcx_active) else "STANDBY")
 
-        # Fetch live wallet balance directly from Upstox API without triggering OTP
-        wallet_str = "Fetching Real-Time Upstox Balance..."
+        # Fetch live wallet balance directly from Fyers API v3
+        wallet_str = "Fetching Real-Time Fyers Balance..."
         try:
-            from execution.upstox_trader import get_live_wallet_balance, get_active_upstox_token
+            from execution.fyers_trader import get_live_wallet_balance, get_active_fyers_token
             from execution.state_manager import StateManager
-            tok = get_active_upstox_token()
+            tok = get_active_fyers_token()
             avail = get_live_wallet_balance(access_token=tok, auto_renew=False)
             if avail > 0:
-                wallet_str = f"Rs {avail:,.2f} INR (Upstox API Synced)"
+                wallet_str = f"Rs {avail:,.2f} INR (Fyers API Synced)"
             else:
                 recorded_bal = StateManager().get_current_wallet_balance()
-                wallet_str = f"Rs {recorded_bal:,.2f} INR (Upstox API Synced)"
+                wallet_str = f"Rs {recorded_bal:,.2f} INR (Fyers API Synced)"
         except Exception:
             try:
                 from execution.state_manager import StateManager
                 recorded_bal = StateManager().get_current_wallet_balance()
-                wallet_str = f"Rs {recorded_bal:,.2f} INR (Upstox API Synced)"
+                wallet_str = f"Rs {recorded_bal:,.2f} INR (Fyers API Synced)"
             except Exception:
-                wallet_str = "Rs 100,000.00 INR (Upstox API Synced)"
+                wallet_str = "Rs 100,000.00 INR (Fyers API Synced)"
 
         status_msg = (
-            "[UPSTOX DUAL-SESSION SYSTEM STATUS]\n"
+            "[FYERS DUAL-SESSION SYSTEM STATUS]\n"
             "========================================\n"
             f"Active Session      : {active_session_str}\n"
             f"Session 1 (NSE)     : {'ONLINE' if nse_active else 'CLOSED (09:00 - 15:30 IST)'}\n"
             f"Session 2 (MCX)     : {'ONLINE' if mcx_active else 'CLOSED (17:00 - 23:15 IST)'}\n"
-            f"💰 [Upstox Live Wallet] Balance: {wallet_str} | Broker: Upstox API v2\n"
+            f"💰 [Fyers Live Wallet] Balance: {wallet_str} | Broker: Fyers API v3\n"
             f"Engine State        : {engine_state}\n"
             "========================================"
         )

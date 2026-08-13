@@ -152,7 +152,7 @@ def generate_trade_report_pdf(start_date: str, end_date: str) -> Tuple[bytes, st
             Paragraph("<b>Max Drawdown:</b>", cell_normal_style),
             Paragraph(f"<b>{data['max_drawdown_pct']:.2f}%</b> (Rs {data['max_drawdown_inr']:,.2f})", cell_bold_style),
             Paragraph("<b>Broker Segment Sync:</b>", cell_normal_style),
-            Paragraph("DhanHQ Live Verified", cell_bold_style)
+            Paragraph("Upstox Live Verified", cell_bold_style)
         ]
     ]
 
@@ -225,8 +225,8 @@ def generate_trade_report_pdf(start_date: str, end_date: str) -> Tuple[bytes, st
 
     # 4. Footer & Compliance Note
     footer_text = Paragraph(
-        "<i>This performance report is generated directly from DhanHQ live broker order execution logs & SQLite trades database.<br/>"
-        "0% Mock / Contamination Verified | DhanHQ API v2 Integration</i>",
+        "<i>This performance report is generated directly from Upstox API v2 live broker order execution logs & SQLite trades database.<br/>"
+        "0% Mock / Contamination Verified | Upstox API v2 Integration</i>",
         subtitle_style
     )
     story.append(KeepTogether([HRFlowable(width="100%", thickness=0.5, color=SECONDARY_COLOR, spaceAfter=6), footer_text]))
