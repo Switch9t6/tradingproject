@@ -453,12 +453,15 @@ def _register_handlers(bot):
             pass
         _send_or_reply(
             bot, message,
-            f"▶️ <b>[TRADING ENGINE RESUMED & FYERS VERIFIED]</b>\n"
+            f"▶️ <b>[TRADING ENGINE RESUMED - FYERS VERIFIED]</b>\n"
             "========================================\n"
-            f"<b>Broker          :</b> Fyers API v3\n"
-            f"<b>Live Cash Margin:</b> <code>Rs {bal:,.2f} INR</code> (Verified)\n"
+            f"<b>Status       :</b> ONLINE &amp; READY\n"
+            f"<b>Broker       :</b> Fyers API v3\n"
+            f"<b>Live Balance :</b> <code>Rs {bal:,.2f} INR</code> (Verified)\n"
+            f"<b>Session 1    :</b> NSE @ 09:15 IST\n"
+            f"<b>Session 2    :</b> MCX @ 17:00 IST\n"
             "========================================\n"
-            "Dynamic scanning re-enabled. Emergency locks cleared.",
+            "✅ Emergency locks cleared. Use <b>/start</b> to trigger a fresh scan now.",
             reply_markup=_build_action_keyboard(telebot)
         )
         _safe_print("[Telegram Control] Trading engine RESUMED & FYERS VERIFIED via Telegram /resume command.")
