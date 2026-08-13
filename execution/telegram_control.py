@@ -438,8 +438,7 @@ def _register_handlers(bot):
             return
 
         try:
-            if os.path.exists(BOT_DISABLED_FLAG):
-                os.remove(BOT_DISABLED_FLAG)
+            _clear_halt_flags()
             halt_alert_flag = "logs/halt_alert_sent.flag"
             if os.path.exists(halt_alert_flag):
                 os.remove(halt_alert_flag)
@@ -449,6 +448,19 @@ def _register_handlers(bot):
             sm.state["is_mcx_locked_today"] = False
             sm.state["current_wallet_balance"] = bal
             sm._save_state(sm.state)
+        except Exception:
+            pass
+
+        open_position_note = ""
+        try:
+            from execution.state_manager import StateManager
+            active_pos = StateManager().state.get("active_position")
+            if active_pos:
+                open_position_note = (
+                    f"<b>Open Position :</b> <code>{active_pos.get('option_symbol', 'N/A')}</code> "
+                    f"qty {active_pos.get('quantity', '?')} @ Rs {active_pos.get('entry_premium', '?')}\n"
+                    "This position is still active and will be monitored & squared off at EOD.\n"
+                )
         except Exception:
             pass
         _send_or_reply(
@@ -461,6 +473,7 @@ def _register_handlers(bot):
             f"<b>Session 1    :</b> NSE @ 09:15 IST\n"
             f"<b>Session 2    :</b> MCX @ 17:00 IST\n"
             "========================================\n"
+            f"{open_position_note}"
             "✅ Emergency locks cleared. Use <b>/start</b> to trigger a fresh scan now.",
             reply_markup=_build_action_keyboard(telebot)
         )
@@ -506,7 +519,13 @@ def _register_handlers(bot):
             active_session_str = "STANDBY (Between Sessions / Closed)"
 
         is_paused = os.path.exists(BOT_DISABLED_FLAG)
+        halt_reason = _read_halt_reason() if is_paused else None
         engine_state = "PAUSED (Kill Switch Active)" if is_paused else ("ONLINE & SCANNING" if (nse_active or mcx_active) else "STANDBY")
+        halt_line = (
+            f"<b>Halt Reason     :</b> <code>{halt_reason}</code>\n"
+            if is_paused and halt_reason
+            else "<b>Halt Reason     :</b> NONE\n"
+        )
 
         # Fetch live wallet balance directly from Fyers API v3 or check Migration Status
         is_conf = False
@@ -548,8 +567,12 @@ def _register_handlers(bot):
             f"Session 2 (MCX)     : {'ONLINE' if mcx_active else 'CLOSED (17:00 - 23:15 IST)'}\n"
             f"💰 [Fyers Live Wallet] Balance: {wallet_str}\n"
             f"Engine State        : {engine_state}\n"
+            f"{halt_line}"
             "========================================\n"
-            f"{migration_footer}"
+            f"{migration_footer}\n"
+            "----------------------------------------\n"
+            "🩺 <b>HEALTH HEARTBEAT</b>\n"
+            f"{_build_health_heartbeat()}"
         )
         _send_or_reply(bot, status_msg, reply_markup=_build_action_keyboard(telebot)) if not isinstance(status_msg, str) else _send_or_reply(bot, message, status_msg, reply_markup=_build_action_keyboard(telebot))
 
@@ -868,6 +891,90 @@ def _register_handlers(bot):
 def is_bot_disabled() -> bool:
     """Check if the remote Telegram kill switch (/stop) is active."""
     return os.path.exists(BOT_DISABLED_FLAG)
+
+
+def _read_halt_reason() -> Optional[str]:
+    """Reads the halt reason from the kill-switch flag file (best-effort)."""
+    for flag in (BOT_DISABLED_FLAG, os.path.join(os.path.dirname(BOT_DISABLED_FLAG), "logs", "bot_disabled.flag")):
+        try:
+            if os.path.exists(flag):
+                with open(flag, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read().strip()
+                if not content:
+                    return "/stop (manual)"
+                if "REASON=" in content:
+                    return content.split("REASON=", 1)[1].strip()
+                if content.lower().startswith("paused"):
+                    return content.split(":", 1)[1].strip() if ":" in content else content
+                return content
+        except Exception:
+            continue
+    return None
+
+
+def _clear_halt_flags():
+    """Clears ALL halt/kill-switch flag files (root + legacy logs/)."""
+    for flag in (BOT_DISABLED_FLAG, os.path.join(os.path.dirname(BOT_DISABLED_FLAG), "logs", "bot_disabled.flag")):
+        try:
+            if os.path.exists(flag):
+                os.remove(flag)
+        except Exception:
+            pass
+
+
+def _build_health_heartbeat() -> str:
+    """Cache freshness + token age + last order time for /status observability."""
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    now = time.time()
+    lines = []
+
+    # Fyers token age
+    try:
+        token_file = os.path.join(base, "logs", "fyers_access_token.json")
+        if os.path.exists(token_file):
+            with open(token_file, "r") as f:
+                tdata = json.load(f)
+            saved_ts = float(tdata.get("saved_timestamp") or 0.0)
+            age_h = (now - saved_ts) / 3600.0 if saved_ts else 0.0
+            if 0 <= age_h <= 26:
+                lines.append(f"<b>Token Age   :</b> {age_h:.1f}h ago (auto-renews at 23h)")
+            else:
+                lines.append(f"<b>Token Age   :</b> {age_h:.1f}h ago <b>(EXPIRED)</b>")
+        else:
+            lines.append("<b>Token Age   :</b> N/A (no token file)")
+    except Exception:
+        lines.append("<b>Token Age   :</b> N/A")
+
+    # Fyers instrument cache freshness
+    for label, fname in (("NSE", "fyers_nse_instruments.json"), ("MCX", "fyers_mcx_instruments.json")):
+        try:
+            cpath = os.path.join(base, "logs", fname)
+            if os.path.exists(cpath):
+                age_h = (now - os.path.getmtime(cpath)) / 3600.0
+                flag = "⚠️ STALE" if age_h > 22 else "OK"
+                lines.append(f"<b>{label} Cache  :</b> {age_h:.1f}h ago ({flag})")
+            else:
+                lines.append(f"<b>{label} Cache  :</b> <b>MISSING</b>")
+        except Exception:
+            lines.append(f"<b>{label} Cache  :</b> N/A")
+
+    # Last recorded order (from SQLite trades table)
+    try:
+        from config.settings import DB_FILE_PATH
+        import sqlite3
+        conn = sqlite3.connect(DB_FILE_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT trade_date, entry_time, option_symbol, status FROM trades ORDER BY id DESC LIMIT 1")
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            lines.append(f"<b>Last Order :</b> {row[0]} {row[1]} {row[2]} ({row[3]})")
+        else:
+            lines.append("<b>Last Order :</b> None yet")
+    except Exception:
+        lines.append("<b>Last Order :</b> N/A")
+
+    return "\n".join(lines)
 
 
 

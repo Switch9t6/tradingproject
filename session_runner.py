@@ -357,18 +357,38 @@ def _run_session_attempt(
         return {"status": "no_trade", "message": "No qualified candidate (score < 75)"}
 
     # ---- Gate 6: budget-approved contract resolution ----
-    from scanner.option_mapper import resolve_atm_option_contract
+    from scanner.option_mapper import resolve_atm_option_contract, last_mapping_error
     option_contract = resolve_atm_option_contract(candidate, max_budget=budget_cap)
     if not option_contract:
-        print(f"[Session Runner] Best candidate exceeded the Rs {budget_cap:,.2f} budget cap. No trade.")
+        map_err = last_mapping_error() or "NO_CONTRACT"
         score_disp = (candidate.get("composite_rating") or {}).get("composite_score", candidate.get("score", "?"))
-        _send_once(
-            f"CONTRACT_NONE_{session}_{flag_date}",
-            f"💸 <b>[{session_label}]</b> Best candidate found (score {score_disp}) but its "
-            f"lot cost exceeds the Rs {budget_cap:,.2f} budget cap. No trade placed.",
-        )
+        if map_err == "STALE_OR_MISSING_CACHE":
+            print(f"[Session Runner] Contract resolution FAILED due to STALE/MISSING Fyers symbol master cache. "
+                  f"This is a DATA problem, not a normal skip.")
+            _send_once(
+                f"CONTRACT_STALE_{session}_{flag_date}",
+                f"⚠️ <b>[{session_label} - CONTRACT MAP STALE]</b>\n"
+                f"Best candidate found (score {score_disp}) but the Fyers symbol master cache is "
+                f"STALE or MISSING, so no valid contract could be resolved.\n"
+                f"<i>This is a data problem - check the Fyers public master URL / server network. "
+                f"Run /status to inspect cache freshness.</i>",
+            )
+        elif map_err == "NO_CONTRACT":
+            print(f"[Session Runner] No matching contract in Fyers master for the ATM strike. No trade.")
+            _send_once(
+                f"CONTRACT_NONE_{session}_{flag_date}",
+                f"🔎 <b>[{session_label}]</b> Best candidate found (score {score_disp}) but no matching "
+                f"option contract exists in the Fyers symbol master for the ATM strike. No trade placed.",
+            )
+        else:
+            print(f"[Session Runner] Best candidate exceeded the Rs {budget_cap:,.2f} budget cap. No trade.")
+            _send_once(
+                f"CONTRACT_NONE_{session}_{flag_date}",
+                f"💸 <b>[{session_label}]</b> Best candidate found (score {score_disp}) but its "
+                f"lot cost exceeds the Rs {budget_cap:,.2f} budget cap. No trade placed.",
+            )
         state.mark_session_done(session, flag_date)
-        return {"status": "no_trade", "message": "Contract exceeds budget cap"}
+        return {"status": "no_trade", "message": "Contract resolution failed", "mapping_error": map_err}
 
     # ---- Gate 7: single Telegram preview of the best opportunity ----
     preview_text = _build_preview_text(session, candidate, option_contract, budget_cap)
