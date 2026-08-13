@@ -358,6 +358,9 @@ class StateManager:
         except Exception as alert_err:
             print(f"[State Manager Exit Alert Notice] {alert_err}")
 
+        # Return the settled net P&L (INR) so callers can dispatch exact realized P&L alerts.
+        return net_pnl if row else None
+
     def get_trades_today_count(self, exchange: str = "NSE_FO") -> int:
         self._check_date_reset()
         segment = "MCX_FO" if ("MCX" in str(exchange).upper()) else "NSE_FO"
