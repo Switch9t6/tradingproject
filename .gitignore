@@ -15,6 +15,11 @@ logs/fyers_nse_instruments.json
 logs/fyers_mcx_instruments.json
 logs/fyers_*.csv.gz
 
+# Runtime auth & broker SDK logs (contain live bearer tokens)
+logs/fyers_access_token.json
+logs/fyersApi.log
+logs/fyersRequests.log
+
 # Byte-compiled / Python caches
 __pycache__/
 *.py[cod]
