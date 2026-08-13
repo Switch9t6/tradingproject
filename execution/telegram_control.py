@@ -649,7 +649,7 @@ def _register_handlers(bot):
             f"========================================\n"
             f"<b>Public IP:</b> <code>{pub_ip}</code>\n"
             f"========================================\n"
-            f"<i>Server IP is active and connected to Upstox API v2 gateway.</i>",
+            f"👉 Copy & paste this IP into your Fyers API Dashboard under Primary Static IP.",
             parse_mode="HTML"
         )
 
