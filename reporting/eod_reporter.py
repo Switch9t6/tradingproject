@@ -509,6 +509,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                                 <span class="reason-tag tag-tsl" style="background:rgba(56,189,248,0.1);color:#38bdf8;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">🔒 TSL LOCKED</span>
                             {% elif t.exit_reason and 'TIME' in t.exit_reason %}
                                 <span class="reason-tag tag-time" style="background:rgba(168,85,247,0.1);color:#a855f7;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">⏳ TIME EXIT</span>
+                            {% elif t.exit_reason and 'MANUAL' in t.exit_reason %}
+                                <span class="reason-tag tag-manual" style="background:rgba(148,163,184,0.12);color:#94a3b8;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">👤 MANUAL EXIT</span>
                             {% elif t.exit_reason and ('STOP' in t.exit_reason or 'SL' in t.exit_reason) %}
                                 <span class="reason-tag tag-sl" style="background:rgba(244,63,94,0.12);color:#f43f5e;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">🛑 STOP LOSS</span>
                             {% else %}

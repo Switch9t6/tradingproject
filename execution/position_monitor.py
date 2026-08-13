@@ -18,8 +18,11 @@ limit-order path. P&L is settled via StateManager.record_exit_trade()
 the entry price, exit price, realized P&L (INR) and the exact exit reason.
 
 The monitor defers to the EOD auto-square-off (15:15 IST for NSE_FO,
-23:00 IST for MCX_FO), on weekends, when the position is closed externally or
-via /squareoff, and while the /stop kill-switch is active.
+23:00 IST for MCX_FO) and on weekends. The /stop command puts the engine into
+SLEEP MODE: it squares off any open position immediately, and no automated
+orders (entries, TSL exits, or EOD square-off) run until /resume or /start is
+sent manually. While asleep, the monitor keeps polling read-only and resumes
+exits once the engine is woken.
 """
 
 import os
@@ -255,6 +258,18 @@ def _execute_exit(symbol: str, quantity: int, trade_id: str, tick_size: float,
     entry_price = float(active_position.get("entry_premium") or 0.0)
     qty = int(active_position.get("quantity") or quantity)
 
+    # If the user already closed the position manually on Fyers, settle it as
+    # MANUAL_EXIT instead of placing a phantom SELL the broker will reject.
+    if not dry_run:
+        try:
+            from execution.fyers_trader import detect_manual_exit_and_record
+            if detect_manual_exit_and_record(active_position, access_token=access_token,
+                                             send_telegram_alert=True):
+                print(f"  [Position Monitor] {symbol} already closed externally. Recorded as MANUAL_EXIT.")
+                return True
+        except Exception as man_exit_err:
+            print(f"  [Position Monitor Manual Exit Notice] {man_exit_err}")
+
     res = None
     for attempt in range(1, 3):
         res = place_aggressive_limit_order(
@@ -353,7 +368,8 @@ def _run_position_monitor(symbol: str, quantity: int, trade_id: str, entry_price
             except Exception:
                 pass
 
-            # System kill switch: defer immediate exit placement to the EOD boundary.
+            # System kill switch: sleep mode means no automated orders. Keep polling
+            # (read-only) so that after /resume or /start the monitor resumes exits.
             try:
                 from execution.telegram_control import is_bot_disabled
                 halted = is_bot_disabled()
@@ -365,9 +381,11 @@ def _run_position_monitor(symbol: str, quantity: int, trade_id: str, entry_price
             is_exit, exit_price, reason = monitor.evaluate_tick(ltp, elapsed)
             if is_exit:
                 if halted:
-                    print(f"  [Position Monitor #{trade_id}] Exit signal ({reason}) but kill switch active. "
-                          "Deferring placement to EOD square-off.")
-                    break
+                    print(f"  [Position Monitor #{trade_id}] Exit signal ({reason}) but SLEEP MODE active "
+                          "(/stop). No automated orders while asleep; position stays open until "
+                          "/resume, /start, or manual /squareoff.")
+                    time.sleep(poll_interval)
+                    continue
                 _execute_exit(symbol, quantity, trade_id, tick_size, access_token, dry_run, exit_price, reason)
                 break
         except Exception as e:

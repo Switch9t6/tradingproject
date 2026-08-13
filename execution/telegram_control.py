@@ -350,6 +350,7 @@ def _register_handlers(bot):
 
     @bot.message_handler(commands=["start"])
     def cmd_start(message):
+        _clear_halt_flags()   # /start is a manual wake command -> exit sleep mode
         if not check_is_market_open():
             _send_or_reply(bot, message, "Market is closed. Active trading sessions: Session 1 NSE (09:00 - 15:30 IST) & Session 2 MCX (17:00 - 23:15 IST).", reply_markup=_build_action_keyboard(telebot))
             return
@@ -417,19 +418,51 @@ def _register_handlers(bot):
         try:
             with open(BOT_DISABLED_FLAG, "w") as f:
                 f.write(f"PAUSED_AT={datetime.datetime.now().isoformat()}")
+
+            # SLEEP-MODE RULE: if a trade is active, exit it IMMEDIATELY,
+            # then hibernate with no automated orders until /resume or /start.
+            exit_note = ""
+            try:
+                from execution.state_manager import StateManager
+                active_pos = StateManager().state.get("active_position")
+                if active_pos:
+                    from execution.fyers_trader import square_off_active_position
+                    sq = square_off_active_position(
+                        access_token=None,
+                        dry_run=False,
+                        exit_reason="KILL_SWITCH_EXIT",
+                        send_telegram_alert=True,
+                    )
+                    if sq.get("status") == "TRADED":
+                        exit_note = (
+                            f"\n✅ <b>Active position EXITED immediately</b> @ Rs {sq.get('exit_premium'):,.2f} "
+                            f"(order <code>{sq.get('order_id')}</code>). P&L settled."
+                        )
+                    else:
+                        exit_note = (
+                            f"\n⚠️ <b>Active position exit FAILED:</b> {sq.get('status')} -> {sq.get('remarks')}\n"
+                            "Engine is SLEEPING (no automated orders). Use <b>/squareoff</b> or <b>/resume</b> to manage the open position."
+                        )
+            except Exception as exit_err:
+                exit_note = f"\n⚠️ <b>Active position exit check failed:</b> {exit_err}"
+
             bot.reply_to(
                 message,
-                "🛑 [TRADING ENGINE PAUSED]\n"
-                "Remote kill switch activated. All automated order placements HALTED.\n"
-                "Send /resume to re-enable trading.",
+                "🛑 <b>[TRADING ENGINE IN SLEEP MODE]</b>\n"
+                "========================================\n"
+                "Sleep mode ACTIVE. No automated scans, entries, or exits will run.\n"
+                "Wake the engine manually with <b>/resume</b> or <b>/start</b>.\n"
+                "========================================\n"
+                f"{exit_note}",
                 reply_markup=_build_action_keyboard(telebot)
             )
-            _safe_print("[Telegram Control] Trading engine PAUSED via Telegram /stop command.")
+            _safe_print("[Telegram Control] Trading engine in SLEEP MODE via Telegram /stop command.")
         except Exception as e:
             bot.reply_to(message, f"[ERROR] Failed to activate kill switch: {e}")
 
     @bot.message_handler(commands=["resume"])
     def cmd_resume(message):
+        _clear_halt_flags()   # /resume is a manual wake command -> exit sleep mode
         if not check_is_market_open():
             bot.reply_to(message, "Market is closed. Active trading sessions: Session 1 NSE (09:00 - 15:30 IST) & Session 2 MCX (17:00 - 23:15 IST).", reply_markup=_build_action_keyboard(telebot))
             return
@@ -469,7 +502,6 @@ def _register_handlers(bot):
             return
 
         try:
-            _clear_halt_flags()
             halt_alert_flag = "logs/halt_alert_sent.flag"
             if os.path.exists(halt_alert_flag):
                 os.remove(halt_alert_flag)
@@ -839,7 +871,7 @@ def _register_handlers(bot):
         bot.reply_to(message, "[SQUARE OFF] Requesting instant live position exit on Upstox API v2...", reply_markup=_build_action_keyboard(telebot))
         try:
             from main import execute_hard_eod_squareoff
-            res = execute_hard_eod_squareoff(dry_run=False)
+            res = execute_hard_eod_squareoff(dry_run=False, allow_when_halted=True)
             if res:
                 msg = (
                     f"✅ [SQUARE OFF EXECUTED]\n"

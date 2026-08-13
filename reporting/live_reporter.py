@@ -496,6 +496,8 @@ LIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                                 <span class="reason-tag tag-tsl">🔒 STEP TSL LOCK</span>
                             {% elif t.exit_reason and 'TIME' in t.exit_reason %}
                                 <span class="reason-tag tag-time">⏳ 30-MIN TIME EXIT</span>
+                            {% elif t.exit_reason and 'MANUAL' in t.exit_reason %}
+                                <span class="reason-tag tag-manual">👤 MANUAL EXIT</span>
                             {% else %}
                                 <span class="reason-tag tag-sl">🛑 STOP LOSS (-12%)</span>
                             {% endif %}

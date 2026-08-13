@@ -147,7 +147,7 @@ def _inspect_blockers(sm, exchange: str, dry_run: bool, override: bool) -> list:
     blockers = []
     from execution.telegram_control import is_bot_disabled
     if is_bot_disabled():
-        blockers.append("Telegram kill switch (/stop) is active - send /resume first")
+        blockers.append("Sleep mode (/stop) is active - send /resume or /start to wake")
     if sm.is_drawdown_limit_exceeded():
         blockers.append("Maximum daily drawdown limit exceeded")
     if not override and not sm.is_trade_allowed_today(exchange=exchange, override_daily_limit=False, dry_run=dry_run):
@@ -233,8 +233,8 @@ def _gates_before_scan(session: str, sm, dry_run: bool, override: bool, flag_dat
     if is_bot_disabled():
         _send_once(
             f"LOCK_{session}_{flag_date}",
-            "🛑 <b>[KILL SWITCH ACTIVE]</b>\nEngine is paused via /stop. "
-            "Use <b>/resume</b> on Telegram to re-enable trading.",
+            "🛑 <b>[SLEEP MODE ACTIVE]</b>\nEngine is asleep via /stop. "
+            "Send <b>/resume</b> or <b>/start</b> on Telegram to wake it.",
         )
         return "Kill switch active"
 

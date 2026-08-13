@@ -169,6 +169,13 @@ EVENING_SCAN_TIME = "17:00"                   # Session 2: MCX Evening Session s
 MORNING_SESSION_WINDOW = ("09:15", "15:30")   # Session 1: NSE window (matches NSE_SESSION_END)
 EVENING_SESSION_WINDOW = ("17:00", "23:15")   # Session 2: MCX window (matches MCX_SESSION_END)
 
+# MANUAL-ONLY OPERATION FLAG: when False (default), automated scheduled session
+# triggers (auto_scheduler.py + the Railway daemon auto-scan loop) are PAUSED.
+# Sessions then start ONLY via manual Telegram commands (/start, /resume), and each
+# live entry still requires interactive Telegram approval before order placement.
+# Set ENABLE_AUTO_SCHEDULER=True to re-enable fully automated scheduled entries.
+ENABLE_AUTO_SCHEDULER: bool = False
+
 # Commodity News & EIA Inventory Blackout Settings
 EIA_BLACKOUT_WINDOW_MINUTES = 15              # Block trading 15 mins before & after 08:00 PM IST Wednesdays
 EIA_INVENTORY_DAY_OF_WEEK = 2                 # 2 = Wednesday (0 = Monday)

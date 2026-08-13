@@ -972,6 +972,137 @@ def resolve_squareoff_symbol(active_position: Dict[str, Any]) -> tuple:
     return candidate, tick
 
 
+def _is_sell_side_trade(trade: dict) -> bool:
+    """True if a tradebook entry is a SELL (Fyers side: -1 for sell, 1 for buy)."""
+    side = trade.get("side")
+    if isinstance(side, (int, float)):
+        return float(side) < 0
+    return "sell" in str(side).lower()
+
+
+def _external_exit_price_from_tradebook(fyers, symbol: str) -> float:
+    """
+    Best-effort exit price for a manually closed position: the most recent SELL
+    fill for the symbol in the tradebook. Falls back to live LTP, then 0.0.
+    """
+    try:
+        tb = fyers.tradebook()
+        if isinstance(tb, dict) and tb.get("s") == "ok":
+            best_ts = 0
+            best_price = 0.0
+            for t in tb.get("tradeBook", []):
+                if not isinstance(t, dict):
+                    continue
+                if str(t.get("symbol") or "") != symbol:
+                    continue
+                if not _is_sell_side_trade(t):
+                    continue
+                if int(t.get("filledQty", 0) or 0) <= 0:
+                    continue
+                try:
+                    price = float(t.get("tradePrice") or t.get("price") or 0)
+                except Exception:
+                    continue
+                try:
+                    ts = int(t.get("tradeTime") or t.get("exchTradeTime") or 0)
+                except Exception:
+                    ts = 0
+                if ts >= best_ts:
+                    best_ts = ts
+                    best_price = price
+            if best_price > 0:
+                return best_price
+    except Exception as e:
+        print(f"[Manual Exit Price Notice] {e}")
+    try:
+        q = fyers.quotes(data={"symbols": symbol})
+        if isinstance(q, dict) and q.get("s") == "ok" and q.get("d"):
+            return float(q["d"][0].get("v", {}).get("lp", 0) or 0)
+    except Exception:
+        pass
+    return 0.0
+
+
+def detect_manual_exit_and_record(active_position: Dict[str, Any], access_token: str = None,
+                                  send_telegram_alert: bool = True) -> bool:
+    """
+    Detects whether the active position was closed OUTSIDE the bot (manually via
+    the Fyers app / app-close) while local state still tracks it as open.
+
+    When the broker no longer holds the position, settles the trade via
+    StateManager.record_exit_trade() with exit_reason='MANUAL_EXIT' using the
+    external SELL fill price from the tradebook, so P&L reports show a manual exit.
+    Returns True if a manual exit was detected and recorded; False otherwise.
+    """
+    if not active_position:
+        return False
+    symbol, _ = resolve_squareoff_symbol(active_position)
+    qty = int(active_position.get("quantity") or 0)
+    trade_id = int(active_position.get("trade_id") or 0)
+    if not symbol or qty <= 0 or not trade_id:
+        return False
+
+    tok = access_token or get_active_fyers_token()
+    if not tok or tok.startswith("MOCK"):
+        return False
+
+    try:
+        app_id = FYERS_APP_ID or os.getenv("FYERS_APP_ID", "").strip()
+        fyers = fyersModel.FyersModel(client_id=app_id, token=tok, is_async=False, log_path=os.path.dirname(TOKEN_FILE_PATH))
+        pos = fyers.positions()
+    except Exception as e:
+        print(f"[Manual Exit Check Notice] Broker positions query failed: {e}")
+        return False
+
+    if not (isinstance(pos, dict) and pos.get("s") == "ok"):
+        print(f"[Manual Exit Check Notice] Broker positions query returned: {pos}")
+        return False
+
+    net_qty = 0
+    found = False
+    for p in pos.get("netPositions", []):
+        if isinstance(p, dict) and str(p.get("symbol") or "") == symbol:
+            found = True
+            net_qty = int(p.get("netQty", 0) or 0)
+            break
+
+    # Broker still holds the position -> NOT a manual exit.
+    if found and net_qty != 0:
+        return False
+
+    # Broker no longer holds the position while local state still tracks it -> manual exit.
+    exit_price = _external_exit_price_from_tradebook(fyers, symbol)
+    if exit_price <= 0:
+        print("[Manual Exit Notice] Could not determine manual exit price. Leaving position as-is.")
+        return False
+
+    try:
+        sm = StateManager()
+        sm.record_exit_trade(trade_id=trade_id, exit_premium=exit_price, exit_reason="MANUAL_EXIT")
+    except Exception as e:
+        print(f"[Manual Exit Notice] Failed to record manual exit: {e}")
+        return False
+
+    print(f"  [Manual Exit] Position {symbol} x {qty} closed externally. "
+          f"Recorded as MANUAL_EXIT @ Rs {exit_price:.2f}.")
+    if send_telegram_alert:
+        try:
+            from reporting.telegram_bot import send_telegram_message
+            send_telegram_message(
+                f"👤 <b>[MANUAL EXIT DETECTED]</b>\n"
+                "========================================\n"
+                f"<b>Symbol    :</b> <code>{symbol}</code>\n"
+                f"<b>Qty       :</b> {qty}\n"
+                f"<b>Exit Price:</b> Rs {exit_price:.2f}\n"
+                "========================================\n"
+                "Position was closed manually on Fyers. Recorded as <b>MANUAL_EXIT</b> "
+                "and will appear as such in today's reports."
+            )
+        except Exception as e:
+            print(f"[Manual Exit Telegram Notice] {e}")
+    return True
+
+
 def square_off_active_position(
     access_token: Optional[str] = None,
     dry_run: bool = False,
@@ -996,6 +1127,23 @@ def square_off_active_position(
             exit_timeout_seconds=exit_timeout_seconds,
             send_telegram_alert=send_telegram_alert,
         )
+
+    # If the position was closed manually on Fyers while we still track it, settle
+    # it as MANUAL_EXIT instead of placing a phantom SELL that the broker rejects.
+    if not dry_run:
+        try:
+            if detect_manual_exit_and_record(active_pos, access_token=access_token,
+                                             send_telegram_alert=send_telegram_alert):
+                symbol, _ = resolve_squareoff_symbol(active_pos)
+                return {
+                    "status": "MANUAL_EXIT",
+                    "symbol": symbol,
+                    "quantity": int(active_pos.get("quantity") or 0),
+                    "trade_id": int(active_pos.get("trade_id") or 0),
+                    "remarks": "Position was closed manually on Fyers; recorded as MANUAL_EXIT.",
+                }
+        except Exception as man_exit_err:
+            print(f"[Square-off Manual Exit Notice] {man_exit_err}")
 
     symbol, tick_size = resolve_squareoff_symbol(active_pos)
     qty = int(active_pos.get("quantity") or 0)

@@ -431,15 +431,29 @@ def run_daily_pipeline(
     generate_eod_report(dry_run=dry_run)
     print("\n[ORCHESTRATOR COMPLETE] Session 1 NSE quantitative options pipeline finished successfully.")
 
-def execute_hard_eod_squareoff(access_token: str = None, dry_run: bool = False, session_tag: str = "1515"):
+def execute_hard_eod_squareoff(access_token: str = None, dry_run: bool = False, session_tag: str = "1515", allow_when_halted: bool = False):
     """
     Hard EOD Square-Off Enforcement:
     - Session 1 (NSE): Runs at 15:15 IST
     - Session 2 (MCX): Runs at 23:00 IST
     Forcibly closes any active intraday MIS option position before market close
     by placing a marketable SELL limit order and settling P&L in StateManager.
+
+    SLEEP-MODE RULE: automated runs are skipped while the /stop kill switch is
+    active. Manual triggers (/squareoff) pass allow_when_halted=True.
     """
     print(f"\n[{session_tag} IST] HARD EOD SQUARE-OFF ENFORCEMENT RUNNING...")
+
+    # Sleep mode: no automated orders while /stop is active.
+    if not allow_when_halted:
+        try:
+            from execution.telegram_control import is_bot_disabled
+            if is_bot_disabled():
+                print("[EOD Square-off] SLEEP MODE ACTIVE (/stop). Skipping automated EOD square-off. "
+                      "Wake with /resume or /start.")
+                return {"status": "skipped_halted", "message": "Sleep mode active; automated EOD square-off skipped."}
+        except Exception:
+            pass
 
     from execution.fyers_trader import square_off_active_position
     res = square_off_active_position(
@@ -520,8 +534,14 @@ if __name__ == "__main__":
         print("=" * 80 + "\n")
 
         from session_runner import run_session_once, SchedulerState
+        from config.settings import ENABLE_AUTO_SCHEDULER
         sched_state = SchedulerState()
         sched_state.load()
+
+        if not ENABLE_AUTO_SCHEDULER:
+            print("[MANUAL-ONLY MODE] ENABLE_AUTO_SCHEDULER=False -> automated session entries are PAUSED.")
+            print("[MANUAL-ONLY MODE] Sessions start ONLY via Telegram /start or /resume (each with interactive approval).")
+            print("[MANUAL-ONLY MODE] EOD square-offs, token refresh, and Telegram listener remain ACTIVE.\n")
 
         while True:
             try:
@@ -536,23 +556,25 @@ if __name__ == "__main__":
                     if datetime.time(8, 50) <= c_time <= datetime.time(8, 55):
                         morning_preflight_checks(dry_run=is_dry_run)
 
-                    # Session 1: NSE Options Window (once-per-session gate prevents repeat scans)
-                    if (datetime.time(9, 15) <= c_time <= datetime.time(15, 30)) and not sched_state.is_session_done("nse", date_str):
-                        print(f"[{c_time.strftime('%H:%M:%S')} IST] [DAEMON] Triggering Session 1 NSE Market Scan...")
-                        run_session_once(session="nse", dry_run=is_dry_run, auto_approve=True,
-                                         override=False, micro_capital=True, trigger_source="main daemon")
-                        sched_state.load()
+                    # Automated session entries run ONLY when ENABLE_AUTO_SCHEDULER is True.
+                    if ENABLE_AUTO_SCHEDULER:
+                        # Session 1: NSE Options Window (once-per-session gate prevents repeat scans)
+                        if (datetime.time(9, 15) <= c_time <= datetime.time(15, 30)) and not sched_state.is_session_done("nse", date_str):
+                            print(f"[{c_time.strftime('%H:%M:%S')} IST] [DAEMON] Triggering Session 1 NSE Market Scan...")
+                            run_session_once(session="nse", dry_run=is_dry_run, auto_approve=True,
+                                             override=False, micro_capital=True, trigger_source="main daemon")
+                            sched_state.load()
+
+                        # Session 2: MCX Crude Oil Options Window (once-per-session gate prevents repeat scans)
+                        if (datetime.time(17, 0) <= c_time <= datetime.time(23, 0)) and not sched_state.is_session_done("mcx", date_str):
+                            print(f"[{c_time.strftime('%H:%M:%S')} IST] [DAEMON] Triggering Session 2 MCX Crude Oil Market Scan...")
+                            run_session_once(session="mcx", dry_run=is_dry_run, auto_approve=True,
+                                             override=False, micro_capital=True, trigger_source="main daemon")
+                            sched_state.load()
 
                     # Session 1 Hard Square-Off
                     if datetime.time(15, 15) <= c_time <= datetime.time(15, 20):
                         execute_hard_eod_squareoff(session_tag="1515", dry_run=is_dry_run)
-
-                    # Session 2: MCX Crude Oil Options Window (once-per-session gate prevents repeat scans)
-                    if (datetime.time(17, 0) <= c_time <= datetime.time(23, 0)) and not sched_state.is_session_done("mcx", date_str):
-                        print(f"[{c_time.strftime('%H:%M:%S')} IST] [DAEMON] Triggering Session 2 MCX Crude Oil Market Scan...")
-                        run_session_once(session="mcx", dry_run=is_dry_run, auto_approve=True,
-                                         override=False, micro_capital=True, trigger_source="main daemon")
-                        sched_state.load()
 
                     # Session 2 Hard Square-Off
                     if datetime.time(23, 0) <= c_time <= datetime.time(23, 10):

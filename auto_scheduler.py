@@ -32,6 +32,7 @@ from config.settings import (
     EVENING_SCAN_TIME,
     MORNING_SESSION_WINDOW,
     EVENING_SESSION_WINDOW,
+    ENABLE_AUTO_SCHEDULER,
 )
 from session_runner import run_session_once, get_ist_now, SchedulerState, SESSION_LABELS
 
@@ -133,6 +134,10 @@ def _within_window(time_str: str, start: str, end: str) -> bool:
 
 def _fire_session(state: SchedulerState, session: str, date_str: str, dry_run: bool):
     """Runs one stage-gated session if not already done today."""
+    if not ENABLE_AUTO_SCHEDULER:
+        _safe_print("[AUTO-SCHEDULER] PAUSED: ENABLE_AUTO_SCHEDULER=False. "
+                    "Automated entries disabled; sessions run only via manual /start or /resume.")
+        return
     if state.is_session_done(session, date_str):
         return
     now_str = get_ist_now().strftime("%H:%M")
@@ -155,10 +160,15 @@ def start_automated_daemon(dry_run: bool = True):
     _safe_print("     24/7 AUTOMATED QUANTITATIVE TRADING DAEMON INITIALIZED     ")
     _safe_print("=" * 80)
     _safe_print(f"Mode       : {mode_tag}")
-    _safe_print("Schedules  :")
-    _safe_print(f"  - Session 1 (NSE Equity & Options) : Mon-Fri @ {MORNING_SCAN_TIME} IST")
-    _safe_print(f"  - Session 2 (MCX Crude Oil Options): Mon-Fri @ {EVENING_SCAN_TIME} IST")
-    _safe_print("Once-per-session gating active. Manual /start & /resume force a fresh run.\n")
+    if ENABLE_AUTO_SCHEDULER:
+        _safe_print("Schedules  :")
+        _safe_print(f"  - Session 1 (NSE Equity & Options) : Mon-Fri @ {MORNING_SCAN_TIME} IST")
+        _safe_print(f"  - Session 2 (MCX Crude Oil Options): Mon-Fri @ {EVENING_SCAN_TIME} IST")
+        _safe_print("Once-per-session gating active. Manual /start & /resume force a fresh run.\n")
+    else:
+        _safe_print("Scheduler  : PAUSED (ENABLE_AUTO_SCHEDULER=False)")
+        _safe_print("  - No automated session entries. Sessions start ONLY via manual /start or /resume.")
+        _safe_print("  - Each live entry requires interactive Telegram approval before order placement.\n")
 
     # 1. Start Telegram command listener + web report server (non-blocking)
     try:
