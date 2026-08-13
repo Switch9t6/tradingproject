@@ -8,6 +8,10 @@ token.json
 logs/*.db
 state.json
 
+# Generated instrument caches (downloaded & versioned by option_mapper.py)
+logs/upstox_mcx_instruments.json
+logs/upstox_nse_instruments.json
+
 # Byte-compiled / Python caches
 __pycache__/
 *.py[cod]

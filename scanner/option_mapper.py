@@ -21,6 +21,9 @@ from config.settings import (
 _upstox_mcx_cache = None
 _upstox_nse_cache = None
 
+_UPSTOX_MCX_CACHE_VERSION = 2   # v2: CRUDEOIL-only rows + fyers_symbol (MCX:<tradingsymbol>)
+_UPSTOX_NSE_CACHE_VERSION = 2   # v2: fyers_symbol (NSE:<tradingsymbol>)
+
 
 def get_upstox_instrument_csv(exchange: str = "NSE") -> List[str]:
     """Downloads and caches official Upstox complete instrument CSV.gz file."""
@@ -62,21 +65,24 @@ def get_upstox_mcx_instrument_map() -> dict:
             mtime = os.path.getmtime(cache_file)
             if time.time() - mtime < 86400:
                 with open(cache_file, "r") as f:
-                    _upstox_mcx_cache = json.load(f)
-                    return _upstox_mcx_cache
+                    data = json.load(f)
+                    if data.get("_cache_version") == _UPSTOX_MCX_CACHE_VERSION:
+                        _upstox_mcx_cache = data
+                        return _upstox_mcx_cache
         except Exception:
             pass
 
     lines = get_upstox_instrument_csv("MCX")
     instr_map = {}
     if lines:
-        header = lines[0].split(",")
         for l in lines[1:]:
             parts = [p.strip('"') for p in l.split(',')]
-            if len(parts) >= 11 and parts[11] == "MCX_FO" and parts[9] in ["OPTFUT", "OPTSTK"]:
+            if len(parts) >= 12 and parts[11] == "MCX_FO" and parts[9] in ["OPTFUT", "OPTSTK"]:
                 try:
-                    instrument_key = parts[0]
                     tsym = parts[2]
+                    if "CRUDEOIL" not in tsym.upper():
+                        continue
+                    instrument_key = parts[0]
                     lot = int(float(parts[8])) if parts[8] else 10
                     stk = float(parts[6]) if parts[6] else 0.0
                     otype = parts[10].upper()
@@ -86,12 +92,14 @@ def get_upstox_mcx_instrument_map() -> dict:
                         instr_map[key] = {
                             "instrument_key": instrument_key,
                             "tradingsymbol": tsym,
+                            "fyers_symbol": f"MCX:{tsym}",
                             "lot_size": lot,
                             "strike": stk
                         }
                 except Exception:
                     pass
 
+    instr_map["_cache_version"] = _UPSTOX_MCX_CACHE_VERSION
     _upstox_mcx_cache = instr_map
     try:
         os.makedirs(os.path.dirname(cache_file), exist_ok=True)
@@ -113,8 +121,10 @@ def get_upstox_nse_instrument_map() -> dict:
             mtime = os.path.getmtime(cache_file)
             if time.time() - mtime < 86400:
                 with open(cache_file, "r") as f:
-                    _upstox_nse_cache = json.load(f)
-                    return _upstox_nse_cache
+                    data = json.load(f)
+                    if data.get("_cache_version") == _UPSTOX_NSE_CACHE_VERSION:
+                        _upstox_nse_cache = data
+                        return _upstox_nse_cache
         except Exception:
             pass
 
@@ -136,12 +146,14 @@ def get_upstox_nse_instrument_map() -> dict:
                         instr_map[key] = {
                             "instrument_key": instrument_key,
                             "tradingsymbol": tsym,
+                            "fyers_symbol": f"NSE:{tsym}",
                             "lot_size": lot,
                             "strike": stk
                         }
                 except Exception:
                     pass
 
+    instr_map["_cache_version"] = _UPSTOX_NSE_CACHE_VERSION
     _upstox_nse_cache = instr_map
     try:
         os.makedirs(os.path.dirname(cache_file), exist_ok=True)
@@ -213,8 +225,13 @@ def get_mcx_crude_option_contract(
             candidates.sort(key=lambda x: x[0])
             real_info = candidates[0][1]
 
+    if not real_info:
+        print(f"  [Option Mapper Notice] No tradable MCX Crude contract found for {underlying_symbol} {int(atm_strike)} {option_type}. No trade.")
+        return None
+
     instrument_key = real_info.get("instrument_key", f"MCX_FO|{underlying_symbol}{int(atm_strike)}{option_type}")
     option_symbol = real_info.get("tradingsymbol", f"{underlying_symbol}_{int(atm_strike)}_{option_type}")
+    fyers_symbol = real_info.get("fyers_symbol", f"MCX:{option_symbol}")
     if real_info.get("lot_size"):
         lot_size = int(real_info["lot_size"])
 
@@ -230,6 +247,7 @@ def get_mcx_crude_option_contract(
         "is_mcx": True,
         "option_symbol": option_symbol,
         "instrument_key": instrument_key,
+        "fyers_symbol": fyers_symbol,
         "option_type": option_type,
         "strike_price": atm_strike,
         "spot_price": spot_price,
@@ -315,8 +333,13 @@ def resolve_atm_option_contract(
     if real_info.get("lot_size"):
         lot_size = int(real_info["lot_size"])
 
+    if not real_info:
+        print(f"  [Option Mapper Notice] No tradable NSE contract found for {symbol} {int(atm_strike)} {option_type}. No trade.")
+        return None
+
     instrument_key = real_info.get("instrument_key", f"NSE_FO|{symbol}{int(atm_strike)}{option_type}")
     option_symbol = real_info.get("tradingsymbol", f"{symbol}_{int(atm_strike)}_{option_type}")
+    fyers_symbol = real_info.get("fyers_symbol", f"NSE:{option_symbol}")
 
     total_lot_cost = round(ask_price * lot_size, 2)
     budget_approved = total_lot_cost <= max_budget
@@ -338,6 +361,7 @@ def resolve_atm_option_contract(
         "exchange": "NSE_FO",
         "option_symbol": option_symbol,
         "instrument_key": instrument_key,
+        "fyers_symbol": fyers_symbol,
         "option_type": option_type,
         "strike_price": atm_strike,
         "spot_price": spot_price,
