@@ -56,14 +56,30 @@ def resolve_is_dry_run(args) -> bool:
     return args.dry_run or not args.live
 
 
+def _within_session_window(now_ist: datetime.datetime) -> bool:
+    """True if now falls inside an active trading session (token refresh deferred)."""
+    t = now_ist.time()
+    for start, end in (MORNING_SESSION_WINDOW, EVENING_SESSION_WINDOW):
+        s = datetime.time(*[int(x) for x in start.split(":")])
+        e = datetime.time(*[int(x) for x in end.split(":")])
+        if s <= t <= e:
+            return True
+    return False
+
+
 def check_token_expiry_prompt():
-    """Refreshes the Fyers access token via headless TOTP at the 23-hour mark."""
+    """Refreshes the Fyers access token via headless TOTP at the 23-hour mark.
+
+    Refresh is deferred while a trading session is live so auth never drops
+    mid-position; it only proceeds during a session if the token has truly expired.
+    """
     try:
         from config.settings import FYERS_TOKEN_FILE_PATH
         import json
         from execution.fyers_trader import auto_generate_fyers_token, get_live_wallet_balance
 
         need_refresh = True
+        age_hours = 999.0
         if os.path.exists(FYERS_TOKEN_FILE_PATH):
             try:
                 with open(FYERS_TOKEN_FILE_PATH, "r") as f:
@@ -73,6 +89,11 @@ def check_token_expiry_prompt():
                 need_refresh = age_hours >= 23.0
             except Exception:
                 need_refresh = True
+
+        if need_refresh and age_hours < 24.0 and _within_session_window(get_ist_now()):
+            _safe_print("[Token Expiry Checker] Token age >= 23h but a trading session is live. "
+                        "Deferring refresh until the session ends to avoid dropping auth mid-position.")
+            return
 
         if need_refresh:
             _safe_print("[Token Expiry Checker] 23-hour token age reached. Initiating Headless TOTP Auto-Login...")
