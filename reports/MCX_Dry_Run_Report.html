@@ -421,8 +421,8 @@
             </div>
             <div class="metric-card">
                 <div class="metric-label">Daily Trades Executed</div>
-                <div class="metric-value" style="color: var(--text-main);">1 / 1</div>
-                <div class="metric-subtext">Max Cap: 1 Trade / Day Hard Lock</div>
+                <div class="metric-value" style="color: var(--text-main);">1 / 5</div>
+                <div class="metric-subtext">Max Cap: 5 Trades / Day Hard Lock</div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Win Rate</div>
@@ -449,12 +449,15 @@
                 <thead>
                     <tr>
                         <th>Trade ID</th>
+                        <th>Date</th>
                         <th>Time</th>
                         <th>Option Contract</th>
+                        <th>Exchange</th>
                         <th>Qty (Lot)</th>
                         <th>Entry Premium</th>
                         <th>Exit Premium</th>
                         <th>Friction Fees</th>
+                        <th>Status</th>
                         <th>Net PnL</th>
                         <th>Execution Reason</th>
                     </tr>
@@ -463,18 +466,27 @@
                     
                     <tr>
                         <td style="color: var(--text-muted);">#20</td>
+                        <td style="color: var(--text-muted); font-size:11px;">2026-08-13</td>
                         <td>17:00:38</td>
                         <td><span class="symbol-badge">NATGASMINI26AUG100PE</span></td>
-                        <td>250 sh</td>
+                        <td style="font-size:11px; color: var(--accent-amber);">MCX_FO</td>
+                        <td>250</td>
                         <td>Rs 1.22</td>
-                        <td>Rs -</td>
+                        <td>-</td>
                         <td style="color: var(--accent-purple);">Rs 0.00</td>
-                        <td class="pnl-positive">
-                            <strong>+Rs 0.00</strong>
+                        <td>
+                            
+                                <span class="status-pill" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">📂 ACTIVE</span>
+                            
+                        </td>
+                        <td class="">
+                            
+                                <strong style="color:var(--accent-amber);">LIVE 📊</strong>
+                            
                         </td>
                         <td>
                             
-                                <span class="reason-tag tag-sl">🛑 STOP LOSS (-12%)</span>
+                                <span class="reason-tag" style="background:rgba(245,158,11,0.1);color:#f59e0b;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">⏳ POSITION OPEN</span>
                             
                         </td>
                     </tr>

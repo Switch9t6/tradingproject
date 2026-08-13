@@ -431,8 +431,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Daily Trades Executed</div>
-                <div class="metric-value" style="color: var(--text-main);">{{ total_trades }} / 1</div>
-                <div class="metric-subtext">Max Cap: 1 Trade / Day Hard Lock</div>
+                <div class="metric-value" style="color: var(--text-main);">{{ total_trades }} / {{ max_cap }}</div>
+                <div class="metric-subtext">Max Cap: {{ max_cap }} Trade{{ 's' if max_cap > 1 else '' }} / Day Hard Lock</div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Win Rate</div>
@@ -459,12 +459,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <thead>
                     <tr>
                         <th>Trade ID</th>
+                        <th>Date</th>
                         <th>Time</th>
                         <th>Option Contract</th>
+                        <th>Exchange</th>
                         <th>Qty (Lot)</th>
                         <th>Entry Premium</th>
                         <th>Exit Premium</th>
                         <th>Friction Fees</th>
+                        <th>Status</th>
                         <th>Net PnL</th>
                         <th>Execution Reason</th>
                     </tr>
@@ -473,24 +476,43 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     {% for t in trades %}
                     <tr>
                         <td style="color: var(--text-muted);">#{{ t.id }}</td>
+                        <td style="color: var(--text-muted); font-size:11px;">{{ t.trade_date }}</td>
                         <td>{{ t.entry_time }}</td>
                         <td><span class="symbol-badge">{{ t.option_symbol }}</span></td>
-                        <td>{{ t.quantity }} sh</td>
+                        <td style="font-size:11px; color: var(--accent-amber);">{{ t.exchange }}</td>
+                        <td>{{ t.quantity }}</td>
                         <td>Rs {{ "%.2f"|format(t.entry_premium or 0) }}</td>
-                        <td>Rs {{ "%.2f"|format(t.exit_premium or 0) if t.exit_premium else '-' }}</td>
+                        <td>{{ 'Rs %.2f'|format(t.exit_premium) if t.exit_premium else '-' }}</td>
                         <td style="color: var(--accent-purple);">Rs {{ "%.2f"|format(t.friction_fees or 0) }}</td>
-                        <td class="{{ 'pnl-positive' if (t.net_pnl or 0) >= 0 else 'pnl-negative' }}">
-                            <strong>{{ '+' if (t.net_pnl or 0) >= 0 else '' }}Rs {{ "%.2f"|format(t.net_pnl or 0) }}</strong>
+                        <td>
+                            {% if t.status == 'OPEN' %}
+                                <span class="status-pill" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">📂 ACTIVE</span>
+                            {% elif t.status == 'CLOSED' %}
+                                <span class="status-pill" style="background:rgba(16,185,129,0.12);color:#10b981;border:1px solid rgba(16,185,129,0.3);">✅ CLOSED</span>
+                            {% else %}
+                                <span class="status-pill">{{ t.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="{{ 'pnl-positive' if (t.net_pnl or 0) > 0 else ('pnl-negative' if (t.net_pnl or 0) < 0 else '') }}">
+                            {% if t.status == 'OPEN' %}
+                                <strong style="color:var(--accent-amber);">LIVE 📊</strong>
+                            {% else %}
+                                <strong>{{ '+' if (t.net_pnl or 0) > 0 else '' }}Rs {{ "%.2f"|format(t.net_pnl or 0) }}</strong>
+                            {% endif %}
                         </td>
                         <td>
-                            {% if t.exit_reason and 'TARGET_HIT' in t.exit_reason %}
-                                <span class="reason-tag tag-target">🎯 TARGET HIT (+25%)</span>
+                            {% if t.status == 'OPEN' %}
+                                <span class="reason-tag" style="background:rgba(245,158,11,0.1);color:#f59e0b;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">⏳ POSITION OPEN</span>
+                            {% elif t.exit_reason and 'TARGET_HIT' in t.exit_reason %}
+                                <span class="reason-tag tag-target" style="background:rgba(16,185,129,0.12);color:#10b981;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">🎯 TARGET HIT</span>
                             {% elif t.exit_reason and ('TSL' in t.exit_reason or 'TRAILING' in t.exit_reason) %}
-                                <span class="reason-tag tag-tsl">🔒 STEP TSL LOCK</span>
+                                <span class="reason-tag tag-tsl" style="background:rgba(56,189,248,0.1);color:#38bdf8;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">🔒 TSL LOCKED</span>
                             {% elif t.exit_reason and 'TIME' in t.exit_reason %}
-                                <span class="reason-tag tag-time">⏳ 30-MIN TIME EXIT</span>
+                                <span class="reason-tag tag-time" style="background:rgba(168,85,247,0.1);color:#a855f7;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">⏳ TIME EXIT</span>
+                            {% elif t.exit_reason and ('STOP' in t.exit_reason or 'SL' in t.exit_reason) %}
+                                <span class="reason-tag tag-sl" style="background:rgba(244,63,94,0.12);color:#f43f5e;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">🛑 STOP LOSS</span>
                             {% else %}
-                                <span class="reason-tag tag-sl">🛑 STOP LOSS (-12%)</span>
+                                <span class="reason-tag" style="color:var(--text-muted);font-size:10px;">{{ t.exit_reason or '-' }}</span>
                             {% endif %}
                         </td>
                     </tr>
@@ -608,11 +630,28 @@ def fetch_upstox_live_order_book_trades() -> list:
         print(f"[EOD Reporter - Upstox Order Book Notice] {e}")
         return []
 
+# MCX exchange identifier: all MCX contract names or exchange flags
+MCX_KEYWORDS = ["MCX", "CRUDE", "CRUDEOIL", "NATGAS", "NATGASMINI", "GOLD", "SILVER", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "MENTHAOIL"]
+
+def _is_mcx_trade(t: dict) -> bool:
+    exchange = str(t.get("exchange", "")).upper()
+    symbol = str(t.get("option_symbol", "")).upper()
+    underlying = str(t.get("underlying_symbol", "")).upper()
+    if "MCX" in exchange:
+        return True
+    for kw in MCX_KEYWORDS:
+        if kw in symbol or kw in underlying:
+            return True
+    return False
+
+def _is_nse_trade(t: dict) -> bool:
+    return not _is_mcx_trade(t)
+
 def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
     """
-    At 15:30 IST, pull trade execution logs from SQLite DB, calculate summary stats,
-    fetch dynamic real-time wallet balance, render Jinja2 HTML report,
-    and output separate report files for Live Mode vs Dry-Run Mode.
+    Pull ALL dry run / live trade execution logs from SQLite DB (all dates for dry run,
+    today-only for live), calculate summary stats, fetch dynamic real-time wallet balance,
+    render Jinja2 HTML report, and output separate report files.
     """
     if not date_str:
         date_str = datetime.date.today().isoformat()
@@ -622,7 +661,7 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
     state_mgr = StateManager()
     realtime_wallet = state_mgr.get_current_wallet_balance()
 
-    # In Live Mode, query DhanHQ API for actual available cash balance
+    # In Live Mode, query Fyers/Upstox API for actual available cash balance
     if not dry_run:
         try:
             upstox_balance, _ = fetch_upstox_live_balance()
@@ -639,22 +678,38 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
         conn = sqlite3.connect(DB_FILE_PATH)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM trades WHERE trade_date = ? AND execution_mode = ?", (date_str, target_mode))
+        if dry_run:
+            # For dry run: show ALL dry run trades across all dates (most recent first)
+            cursor.execute(
+                "SELECT * FROM trades WHERE execution_mode = ? ORDER BY trade_date DESC, id DESC",
+                (target_mode,)
+            )
+        else:
+            # For live: show only today's live trades
+            cursor.execute(
+                "SELECT * FROM trades WHERE trade_date = ? AND execution_mode = ? ORDER BY id DESC",
+                (date_str, target_mode)
+            )
         rows = cursor.fetchall()
         trades = [dict(r) for r in rows]
         conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[EOD Reporter] DB read error: {e}")
 
     # Fallback: fetch live trades directly from Upstox Order Book API
     if not trades and not dry_run:
         trades = fetch_upstox_live_order_book_trades()
     
+    from config.settings import DRY_RUN_MAX_TRADES_PER_SESSION, MAX_DAILY_TRADES
+    max_cap = DRY_RUN_MAX_TRADES_PER_SESSION if dry_run else MAX_DAILY_TRADES
+
     total_trades = len(trades)
-    winning_trades = sum(1 for t in trades if (t.get("net_pnl") or 0) > 0)
-    win_rate = round((winning_trades / total_trades) * 100.0, 2) if total_trades > 0 else 0.0
-    total_friction = round(sum((t.get("friction_fees") or 0.0) for t in trades), 2)
-    net_pnl = round(sum((t.get("net_pnl") or 0.0) for t in trades), 2)
+    closed_trades = [t for t in trades if t.get("status") == "CLOSED"]
+    open_trades = [t for t in trades if t.get("status") == "OPEN"]
+    winning_trades = sum(1 for t in closed_trades if (t.get("net_pnl") or 0) > 0)
+    win_rate = round((winning_trades / len(closed_trades)) * 100.0, 2) if closed_trades else 0.0
+    total_friction = round(sum((t.get("friction_fees") or 0.0) for t in closed_trades), 2)
+    net_pnl = round(sum((t.get("net_pnl") or 0.0) for t in closed_trades), 2)
     pnl_pct = round((net_pnl / INITIAL_WALLET_CAPITAL) * 100.0, 2)
     
     mode_tag = "DRY-RUN SIMULATION" if dry_run else "LIVE PRODUCTION"
@@ -697,56 +752,64 @@ def generate_eod_report(date_str: str = None, dry_run: bool = False) -> str:
         net_pnl=f"{net_pnl:,.2f}",
         pnl_pct=pnl_pct,
         is_positive_pnl=(net_pnl >= 0),
+        max_cap=max_cap,
         trades=trades
     )
     
     report_path = os.path.join(REPORTS_DIR, "LIVE_MARKET_REPORT.html")
-    file_prefix = "EOD_Report_DRYRUN_" if dry_run else "EOD_Report_LIVE_"
     dated_report_path = os.path.join(REPORTS_DIR, f"{file_prefix}{date_str}.html")
-
-    # Separate NSE / MCX Dry Run Reports
     nse_dry_path = os.path.join(REPORTS_DIR, "NSE_Dry_Run_Report.html")
     mcx_dry_path = os.path.join(REPORTS_DIR, "MCX_Dry_Run_Report.html")
 
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html_output)
-
     with open(dated_report_path, "w", encoding="utf-8") as f:
         f.write(html_output)
 
     if dry_run:
-        nse_trades = [t for t in trades if "NSE" in str(t.get("exchange", "")).upper() or "NIFTY" in str(t.get("option_symbol", "")).upper() or "BANK" in str(t.get("option_symbol", "")).upper()]
-        mcx_trades = [t for t in trades if "MCX" in str(t.get("exchange", "")).upper() or "CRUDE" in str(t.get("option_symbol", "")).upper()]
-        
-        # Render NSE Dry Run Report
+        nse_trades = [t for t in trades if _is_nse_trade(t)]
+        mcx_trades = [t for t in trades if _is_mcx_trade(t)]
+
+        def _segment_stats(seg_trades):
+            seg_closed = [t for t in seg_trades if t.get("status") == "CLOSED"]
+            seg_wins = sum(1 for t in seg_closed if (t.get("net_pnl") or 0) > 0)
+            seg_wr = round((seg_wins / len(seg_closed)) * 100.0, 2) if seg_closed else 0.0
+            seg_friction = sum((t.get('friction_fees') or 0.0) for t in seg_closed)
+            seg_pnl = sum((t.get('net_pnl') or 0.0) for t in seg_closed)
+            return seg_wins, seg_wr, seg_friction, seg_pnl
+
+        nse_wins, nse_wr, nse_friction, nse_pnl = _segment_stats(nse_trades)
+        mcx_wins, mcx_wr, mcx_friction, mcx_pnl = _segment_stats(mcx_trades)
+
         html_nse = template.render(
             date=date_str, mode_label="NSE DRY-RUN SIMULATION", is_dry_run=True,
             capital_base=f"{INITIAL_WALLET_CAPITAL:,.2f}", realtime_wallet=f"{realtime_wallet:,.2f}",
-            total_trades=len(nse_trades), winning_trades=sum(1 for t in nse_trades if (t.get("net_pnl") or 0) > 0),
-            win_rate_val=round((sum(1 for t in nse_trades if (t.get("net_pnl") or 0) > 0) / len(nse_trades)) * 100.0, 2) if nse_trades else 0.0,
-            total_friction=f"{sum((t.get('friction_fees') or 0.0) for t in nse_trades):,.2f}",
-            net_pnl=f"{sum((t.get('net_pnl') or 0.0) for t in nse_trades):,.2f}",
-            pnl_pct=round((sum((t.get('net_pnl') or 0.0) for t in nse_trades) / INITIAL_WALLET_CAPITAL) * 100.0, 2),
-            is_positive_pnl=(sum((t.get('net_pnl') or 0.0) for t in nse_trades) >= 0), trades=nse_trades
+            total_trades=len(nse_trades), winning_trades=nse_wins, win_rate_val=nse_wr,
+            total_friction=f"{nse_friction:,.2f}", net_pnl=f"{nse_pnl:,.2f}",
+            pnl_pct=round((nse_pnl / INITIAL_WALLET_CAPITAL) * 100.0, 2),
+            is_positive_pnl=(nse_pnl >= 0), max_cap=max_cap, trades=nse_trades
         )
         with open(nse_dry_path, "w", encoding="utf-8") as f:
             f.write(html_nse)
 
-        # Render MCX Dry Run Report
         html_mcx = template.render(
             date=date_str, mode_label="MCX DRY-RUN SIMULATION", is_dry_run=True,
             capital_base=f"{INITIAL_WALLET_CAPITAL:,.2f}", realtime_wallet=f"{realtime_wallet:,.2f}",
-            total_trades=len(mcx_trades), winning_trades=sum(1 for t in mcx_trades if (t.get("net_pnl") or 0) > 0),
-            win_rate_val=round((sum(1 for t in mcx_trades if (t.get("net_pnl") or 0) > 0) / len(mcx_trades)) * 100.0, 2) if mcx_trades else 0.0,
-            total_friction=f"{sum((t.get('friction_fees') or 0.0) for t in mcx_trades):,.2f}",
-            net_pnl=f"{sum((t.get('net_pnl') or 0.0) for t in mcx_trades):,.2f}",
-            pnl_pct=round((sum((t.get('net_pnl') or 0.0) for t in mcx_trades) / INITIAL_WALLET_CAPITAL) * 100.0, 2),
-            is_positive_pnl=(sum((t.get('net_pnl') or 0.0) for t in mcx_trades) >= 0), trades=mcx_trades
+            total_trades=len(mcx_trades), winning_trades=mcx_wins, win_rate_val=mcx_wr,
+            total_friction=f"{mcx_friction:,.2f}", net_pnl=f"{mcx_pnl:,.2f}",
+            pnl_pct=round((mcx_pnl / INITIAL_WALLET_CAPITAL) * 100.0, 2),
+            is_positive_pnl=(mcx_pnl >= 0), max_cap=max_cap, trades=mcx_trades
         )
         with open(mcx_dry_path, "w", encoding="utf-8") as f:
             f.write(html_mcx)
-        
-    print(f"\n[EOD Reporter] Reports saved:\n  1. '{report_path}'\n  2. '{dated_report_path}'\n  3. '{nse_dry_path}'\n  4. '{mcx_dry_path}'")
+
+        print(f"\n[EOD Reporter] Reports saved:")
+        print(f"  1. ALL DRY-RUN : '{report_path}'")
+        print(f"  2. DATED        : '{dated_report_path}'")
+        print(f"  3. NSE          : '{nse_dry_path}' ({len(nse_trades)} trades)")
+        print(f"  4. MCX          : '{mcx_dry_path}' ({len(mcx_trades)} trades)")
+    else:
+        print(f"\n[EOD Reporter] Reports saved:\n  1. '{report_path}'\n  2. '{dated_report_path}'")
     return report_path
 
 if __name__ == "__main__":

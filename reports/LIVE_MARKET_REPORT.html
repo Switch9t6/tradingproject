@@ -413,25 +413,25 @@
             <div class="metric-card">
                 <div class="metric-label">Net Daily PnL</div>
                 <div class="metric-value pnl-positive">
-                    +Rs 0.00
+                    +Rs 401.93
                 </div>
                 <div class="metric-subtext pnl-positive">
-                    +0.0% Net Return
+                    +4.02% Net Return
                 </div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Daily Trades Executed</div>
-                <div class="metric-value" style="color: var(--text-main);">1 / 1</div>
-                <div class="metric-subtext">Max Cap: 1 Trade / Day Hard Lock</div>
+                <div class="metric-value" style="color: var(--text-main);">7 / 5</div>
+                <div class="metric-subtext">Max Cap: 5 Trades / Day Hard Lock</div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Win Rate</div>
-                <div class="metric-value" style="color: var(--accent-amber);">0.0%</div>
-                <div class="metric-subtext">0 Wins / 1 Losses</div>
+                <div class="metric-value" style="color: var(--accent-green);">100.0%</div>
+                <div class="metric-subtext">2 Wins / 5 Losses</div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Total Friction Fees</div>
-                <div class="metric-value" style="color: var(--accent-purple);">Rs 0.00</div>
+                <div class="metric-value" style="color: var(--accent-purple);">Rs 98.82</div>
                 <div class="metric-subtext">Brokerage + STT + Txn Fee + GST</div>
             </div>
         </div>
@@ -449,12 +449,15 @@
                 <thead>
                     <tr>
                         <th>Trade ID</th>
+                        <th>Date</th>
                         <th>Time</th>
                         <th>Option Contract</th>
+                        <th>Exchange</th>
                         <th>Qty (Lot)</th>
                         <th>Entry Premium</th>
                         <th>Exit Premium</th>
                         <th>Friction Fees</th>
+                        <th>Status</th>
                         <th>Net PnL</th>
                         <th>Execution Reason</th>
                     </tr>
@@ -463,18 +466,189 @@
                     
                     <tr>
                         <td style="color: var(--text-muted);">#20</td>
+                        <td style="color: var(--text-muted); font-size:11px;">2026-08-13</td>
                         <td>17:00:38</td>
                         <td><span class="symbol-badge">NATGASMINI26AUG100PE</span></td>
-                        <td>250 sh</td>
+                        <td style="font-size:11px; color: var(--accent-amber);">MCX_FO</td>
+                        <td>250</td>
                         <td>Rs 1.22</td>
-                        <td>Rs -</td>
+                        <td>-</td>
                         <td style="color: var(--accent-purple);">Rs 0.00</td>
-                        <td class="pnl-positive">
-                            <strong>+Rs 0.00</strong>
+                        <td>
+                            
+                                <span class="status-pill" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">📂 ACTIVE</span>
+                            
+                        </td>
+                        <td class="">
+                            
+                                <strong style="color:var(--accent-amber);">LIVE 📊</strong>
+                            
                         </td>
                         <td>
                             
-                                <span class="reason-tag tag-sl">🛑 STOP LOSS (-12%)</span>
+                                <span class="reason-tag" style="background:rgba(245,158,11,0.1);color:#f59e0b;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">⏳ POSITION OPEN</span>
+                            
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <td style="color: var(--text-muted);">#17</td>
+                        <td style="color: var(--text-muted); font-size:11px;">2026-08-11</td>
+                        <td>18:09:59</td>
+                        <td><span class="symbol-badge">DRREDDY-Aug2026-540-CE</span></td>
+                        <td style="font-size:11px; color: var(--accent-amber);">NSE_FO</td>
+                        <td>625</td>
+                        <td>Rs 1.60</td>
+                        <td>Rs 2.00</td>
+                        <td style="color: var(--accent-purple);">Rs 49.41</td>
+                        <td>
+                            
+                                <span class="status-pill" style="background:rgba(16,185,129,0.12);color:#10b981;border:1px solid rgba(16,185,129,0.3);">✅ CLOSED</span>
+                            
+                        </td>
+                        <td class="pnl-positive">
+                            
+                                <strong>+Rs 200.59</strong>
+                            
+                        </td>
+                        <td>
+                            
+                                <span class="reason-tag tag-target" style="background:rgba(16,185,129,0.12);color:#10b981;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">🎯 TARGET HIT</span>
+                            
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <td style="color: var(--text-muted);">#16</td>
+                        <td style="color: var(--text-muted); font-size:11px;">2026-08-11</td>
+                        <td>18:09:51</td>
+                        <td><span class="symbol-badge">CIPLA-Oct2026-1780-CE</span></td>
+                        <td style="font-size:11px; color: var(--accent-amber);">NSE_FO</td>
+                        <td>425</td>
+                        <td>Rs 2.35</td>
+                        <td>Rs 2.94</td>
+                        <td style="color: var(--accent-purple);">Rs 49.41</td>
+                        <td>
+                            
+                                <span class="status-pill" style="background:rgba(16,185,129,0.12);color:#10b981;border:1px solid rgba(16,185,129,0.3);">✅ CLOSED</span>
+                            
+                        </td>
+                        <td class="pnl-positive">
+                            
+                                <strong>+Rs 201.34</strong>
+                            
+                        </td>
+                        <td>
+                            
+                                <span class="reason-tag tag-target" style="background:rgba(16,185,129,0.12);color:#10b981;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">🎯 TARGET HIT</span>
+                            
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <td style="color: var(--text-muted);">#15</td>
+                        <td style="color: var(--text-muted); font-size:11px;">2026-08-11</td>
+                        <td>18:09:41</td>
+                        <td><span class="symbol-badge">INFY-Aug2026-900-CE</span></td>
+                        <td style="font-size:11px; color: var(--accent-amber);">NSE_FO</td>
+                        <td>400</td>
+                        <td>Rs 2.50</td>
+                        <td>-</td>
+                        <td style="color: var(--accent-purple);">Rs 0.00</td>
+                        <td>
+                            
+                                <span class="status-pill" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">📂 ACTIVE</span>
+                            
+                        </td>
+                        <td class="">
+                            
+                                <strong style="color:var(--accent-amber);">LIVE 📊</strong>
+                            
+                        </td>
+                        <td>
+                            
+                                <span class="reason-tag" style="background:rgba(245,158,11,0.1);color:#f59e0b;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">⏳ POSITION OPEN</span>
+                            
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <td style="color: var(--text-muted);">#14</td>
+                        <td style="color: var(--text-muted); font-size:11px;">2026-08-11</td>
+                        <td>18:09:36</td>
+                        <td><span class="symbol-badge">TCS-Aug2026-1400-CE</span></td>
+                        <td style="font-size:11px; color: var(--accent-amber);">NSE_FO</td>
+                        <td>225</td>
+                        <td>Rs 4.44</td>
+                        <td>-</td>
+                        <td style="color: var(--accent-purple);">Rs 0.00</td>
+                        <td>
+                            
+                                <span class="status-pill" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">📂 ACTIVE</span>
+                            
+                        </td>
+                        <td class="">
+                            
+                                <strong style="color:var(--accent-amber);">LIVE 📊</strong>
+                            
+                        </td>
+                        <td>
+                            
+                                <span class="reason-tag" style="background:rgba(245,158,11,0.1);color:#f59e0b;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">⏳ POSITION OPEN</span>
+                            
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <td style="color: var(--text-muted);">#13</td>
+                        <td style="color: var(--text-muted); font-size:11px;">2026-08-11</td>
+                        <td>18:09:10</td>
+                        <td><span class="symbol-badge">LUPIN-Aug2026-1520-CE</span></td>
+                        <td style="font-size:11px; color: var(--accent-amber);">NSE_FO</td>
+                        <td>425</td>
+                        <td>Rs 2.35</td>
+                        <td>-</td>
+                        <td style="color: var(--accent-purple);">Rs 0.00</td>
+                        <td>
+                            
+                                <span class="status-pill" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">📂 ACTIVE</span>
+                            
+                        </td>
+                        <td class="">
+                            
+                                <strong style="color:var(--accent-amber);">LIVE 📊</strong>
+                            
+                        </td>
+                        <td>
+                            
+                                <span class="reason-tag" style="background:rgba(245,158,11,0.1);color:#f59e0b;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">⏳ POSITION OPEN</span>
+                            
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <td style="color: var(--text-muted);">#12</td>
+                        <td style="color: var(--text-muted); font-size:11px;">2026-08-11</td>
+                        <td>18:09:00</td>
+                        <td><span class="symbol-badge">DRREDDY-Aug2026-620-CE</span></td>
+                        <td style="font-size:11px; color: var(--accent-amber);">NSE_FO</td>
+                        <td>625</td>
+                        <td>Rs 1.60</td>
+                        <td>-</td>
+                        <td style="color: var(--accent-purple);">Rs 0.00</td>
+                        <td>
+                            
+                                <span class="status-pill" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">📂 ACTIVE</span>
+                            
+                        </td>
+                        <td class="">
+                            
+                                <strong style="color:var(--accent-amber);">LIVE 📊</strong>
+                            
+                        </td>
+                        <td>
+                            
+                                <span class="reason-tag" style="background:rgba(245,158,11,0.1);color:#f59e0b;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;">⏳ POSITION OPEN</span>
                             
                         </td>
                     </tr>
